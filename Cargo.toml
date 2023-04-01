@@ -6,6 +6,9 @@ description = "A data-driven, Markov Chain-based tilemap generator library and a
 authors = ["Jan Małek"]
 keywords = ["gamedev", "random", "library", "map", "procedural"]
 categories = ["game-development"]
+repository = "https://github.com/scrdest/MorkovChain-maptiler"
+license = "Apache-2.0"
+readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
