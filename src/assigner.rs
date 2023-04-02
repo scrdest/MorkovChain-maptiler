@@ -2,11 +2,11 @@ use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref};
 use std::sync::{Arc, RwLock};
-use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeWrapper};
+use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeWrapper, PositionKey};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use serde::{Serialize, Deserialize};
 
-type Queue<K> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K>>>>;
+type Queue<K, P> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K, P>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -32,15 +32,15 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MapColoringJob<K: DistributionKey> {
+pub struct MapColoringJob<K: DistributionKey, P: PositionKey> {
     rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<K>>>,
-    queue: Queue<K>,
+    pub map: Arc<RwLock<Map2D<K, P>>>,
+    queue: Queue<K, P>,
     queue_state: QueueState
 }
 
-impl<K: DistributionKey> MapColoringJob<K> {
-    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K>) -> Self {
+impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
+    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
         let wrapped_map = Arc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
@@ -54,7 +54,7 @@ impl<K: DistributionKey> MapColoringJob<K> {
         }
     }
 
-    fn build_queue(&mut self) -> &Queue<K> {
+    fn build_queue(&mut self) -> &Queue<K, P> {
         let map_reader = self.map.read().unwrap();
         let wrapped_queue = &self.queue;
         let mut queue_writer = wrapped_queue.write().unwrap();
@@ -73,13 +73,13 @@ impl<K: DistributionKey> MapColoringJob<K> {
         wrapped_queue
     }
 
-    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K>) -> Self {
+    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
         let mut inst = Self::new(rules, map);
         inst.build_queue();
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K>>> {
+    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
         let mut queue_writer = self.queue.write().unwrap();
         let map = &self.map;
         let mut map_operator = map.write().unwrap();
@@ -136,7 +136,7 @@ impl<K: DistributionKey> MapColoringJob<K> {
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K>>> {
+    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
         self.build_queue();
         self.assign_map()
     }

@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::ops::Add;
 use std::sync::{Arc, RwLock};
 use super::sampler::{MultinomialDistribution, DistributionKey};
@@ -14,20 +15,24 @@ use serde::{Serialize, Deserialize};
 //     I128(i128, i128),
 // }
 
+pub trait PositionKey: Copy + Clone + Add<Output = Self> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded {}
+impl<P: Copy + Clone + Add<Output = P> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded> PositionKey for P {}
+
+
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Ord, PartialOrd, Debug, Default, Serialize, Deserialize)]
-pub struct Position2D {
-    pub x: i64,
-    pub y: i64
+pub struct Position2D<P: PositionKey> {
+    pub x: P,
+    pub y: P
 }
 
-impl Position2D {
-    pub fn new(x: i64, y: i64) -> Self {
+impl<P: PositionKey> Position2D<P> {
+    pub fn new(x: P, y: P) -> Self {
         Self {x, y}
     }
 }
 
-impl From<(i64, i64)> for Position2D {
-    fn from(value: (i64, i64)) -> Self {
+impl<P: PositionKey> From<(P, P)> for Position2D<P> {
+    fn from(value: (P, P)) -> Self {
         Self {
             x: value.0,
             y: value.1
@@ -35,14 +40,14 @@ impl From<(i64, i64)> for Position2D {
     }
 }
 
-impl Into<(i64, i64)> for Position2D {
-    fn into(self) -> (i64, i64) {
+impl<P: PositionKey> Into<(P, P)> for Position2D<P> {
+    fn into(self) -> (P, P) {
         (self.x, self.y)
     }
 }
 
-impl Add for Position2D {
-    type Output = Position2D;
+impl<PA: PositionKey + Add<Output = PA>> Add for Position2D<PA> {
+    type Output = Position2D<PA>;
 
     fn add(self, rhs: Self) -> Self::Output {
         Position2D {
@@ -52,22 +57,32 @@ impl Add for Position2D {
     }
 }
 
-impl Position2D {
-    pub fn adjacents_cardinal(&self) -> ArrayVec<Position2D, 8> {
-        let mut adjacents: ArrayVec::<Position2D, 8> = ArrayVec::new();
+
+impl<P: PositionKey> Position2D<P> {
+    pub fn adjacents_cardinal(&self) -> ArrayVec<Position2D<P>, 8> {
+        let mut adjacents: ArrayVec::<Position2D<P>, 8> = ArrayVec::new();
+        let type_unity: P = num::one();
+        let type_three: P = type_unity + type_unity + type_unity;
 
         for dim in 0..2 {
-            for offset in -1..2 {
-                if offset == 0 {
+
+            let offset_range = num::range(
+                 num::zero(),
+                 type_three
+            );
+
+            for offset in offset_range {
+                if offset == type_unity {
                     continue
                 };
+                let true_offset = offset - type_unity;
 
                 let mut pos_buffer = [self.x, self.y];
-                pos_buffer[dim] = pos_buffer[dim] + offset;
+                pos_buffer[dim] = pos_buffer[dim] + true_offset;
 
                 let new_pos = Position2D {
-                    x: pos_buffer[0],
-                    y: pos_buffer[1]
+                    x: pos_buffer[0].into(),
+                    y: pos_buffer[1].into()
                 };
 
                 adjacents.push(new_pos);
@@ -77,14 +92,30 @@ impl Position2D {
         adjacents
     }
 
-    pub fn adjacents_octile(&self) ->Vec<Position2D> {
-        let mut adjacents = Vec::with_capacity(8);
+    pub fn adjacents_octile(&self) -> ArrayVec<Position2D<P>, 8> {
+        let mut adjacents: ArrayVec<Position2D<P>, 8> = ArrayVec::new();
 
-        for x_dim in -1..2 {
-            for y_dim in -1..2 {
-                if x_dim == 0 && y_dim == 0 {
+        let type_unity: P = P::one();
+        let type_three = type_unity + type_unity + type_unity;
+
+        let x_range = num::range(
+            P::zero(),
+            type_three
+        );
+
+        for raw_x_dim in x_range {
+            let x_dim = raw_x_dim - type_unity;
+
+            let y_range = num::range(
+                P::zero(),
+                type_three
+            );
+
+            for raw_y_dim in y_range {
+                if raw_x_dim.is_one() && raw_y_dim.is_one() {
                     continue
                 };
+                let y_dim = raw_y_dim - type_unity;
                 let new_pos = Position2D {
                     x: self.x + x_dim,
                     y: self.y + y_dim
@@ -97,15 +128,16 @@ impl Position2D {
     }
 }
 
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Map2DNode<N: DistributionKey> {
-    pub(crate) position: Position2D,
-    pub(crate) possibilities: MultinomialDistribution<N>,
-    pub(crate) assignment: Option<N>
+pub struct Map2DNode<K: DistributionKey, P: PositionKey> {
+    pub(crate) position: Position2D<P>,
+    pub(crate) possibilities: MultinomialDistribution<K>,
+    pub(crate) assignment: Option<K>
 }
 
-impl<N: DistributionKey> Map2DNode<N> {
-    pub fn with_possibilities(position: Position2D, possibilities: MultinomialDistribution<N>) -> Self<> {
+impl<K: DistributionKey, P: PositionKey> Map2DNode<K, P> {
+    pub fn with_possibilities(position: Position2D<P>, possibilities: MultinomialDistribution<K>) -> Self<> {
         Self {
             position,
             possibilities,
@@ -113,7 +145,7 @@ impl<N: DistributionKey> Map2DNode<N> {
         }
     }
 
-    pub fn with_assignment(position: Position2D, assignment: N) -> Self<> {
+    pub fn with_assignment(position: Position2D<P>, assignment: K) -> Self<> {
         Self {
             position,
             possibilities: MultinomialDistribution::uniform_over(vec![]),
@@ -130,13 +162,13 @@ impl<N: DistributionKey> Map2DNode<N> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub enum MapNodeWrapper<K: DistributionKey> {
-    Raw(Map2DNode<K>),
-    Arc(Arc<RwLock<Map2DNode<K>>>)
+pub enum MapNodeWrapper<K: DistributionKey, P: PositionKey> {
+    Raw(Map2DNode<K, P>),
+    Arc(Arc<RwLock<Map2DNode<K, P>>>)
 }
 
-impl<K: DistributionKey> MapNodeWrapper<K> {
-    pub fn position(&self) -> Position2D {
+impl<K: DistributionKey, P: PositionKey> MapNodeWrapper<K, P> {
+    pub fn position(&self) -> Position2D<P> {
         match self { 
             Self::Raw(node) => node.position,
             Self::Arc(arc_node) => arc_node.read().unwrap().position
@@ -145,27 +177,27 @@ impl<K: DistributionKey> MapNodeWrapper<K> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MapNodeEntropyOrdering<K: DistributionKey> {
-    pub node: MapNodeWrapper<K>
+pub struct MapNodeEntropyOrdering<K: DistributionKey, P: PositionKey> {
+    pub node: MapNodeWrapper<K, P>
 }
 
-impl<K: DistributionKey> From<Map2DNode<K>> for MapNodeEntropyOrdering<K> {
-    fn from(value: Map2DNode<K>) -> Self {
+impl<K: DistributionKey, P: PositionKey> From<Map2DNode<K, P>> for MapNodeEntropyOrdering<K, P> {
+    fn from(value: Map2DNode<K, P>) -> Self {
         Self {
             node: MapNodeWrapper::Raw(value.clone())
         }
     }
 }
 
-impl<K: DistributionKey> From<Arc<RwLock<Map2DNode<K>>>> for MapNodeEntropyOrdering<K> {
-    fn from(value: Arc<RwLock<Map2DNode<K>>>) -> Self {
+impl<K: DistributionKey, P: PositionKey> From<Arc<RwLock<Map2DNode<K, P>>>> for MapNodeEntropyOrdering<K, P> {
+    fn from(value: Arc<RwLock<Map2DNode<K, P>>>) -> Self {
         Self {
             node: MapNodeWrapper::Arc(value.clone())
         }
     }
 }
 
-impl<N: DistributionKey> PartialEq<Self> for MapNodeEntropyOrdering<N> {
+impl<K: DistributionKey, P: PositionKey> PartialEq<Self> for MapNodeEntropyOrdering<K, P> {
     fn eq(&self, other: &Self) -> bool {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
@@ -181,9 +213,9 @@ impl<N: DistributionKey> PartialEq<Self> for MapNodeEntropyOrdering<N> {
     }
 }
 
-impl<N: DistributionKey> Eq for MapNodeEntropyOrdering<N> {}
+impl<K: DistributionKey, P: PositionKey> Eq for MapNodeEntropyOrdering<K, P> {}
 
-impl<N: DistributionKey> PartialOrd for MapNodeEntropyOrdering<N> {
+impl<K: DistributionKey, P: PositionKey> PartialOrd for MapNodeEntropyOrdering<K, P> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
@@ -205,31 +237,31 @@ impl<N: DistributionKey> PartialOrd for MapNodeEntropyOrdering<N> {
     }
 }
 
-impl<N: DistributionKey> Ord for MapNodeEntropyOrdering<N> {
+impl<K: DistributionKey, P: PositionKey> Ord for MapNodeEntropyOrdering<K, P> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
 }
 
-pub type ThreadsafeNodeRef<N> = Arc<RwLock<Map2DNode<N>>>;
+pub type ThreadsafeNodeRef<K, P> = Arc<RwLock<Map2DNode<K, P>>>;
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Map2D<N: DistributionKey> {
-    pub tiles: Vec<ThreadsafeNodeRef<N>>,
-    position_index: HashMap<Position2D, ThreadsafeNodeRef<N>>,
-    pub undecided_tiles: HashMap<Position2D, ThreadsafeNodeRef<N>>,
-    pub(crate) min_pos: Position2D,
-    pub(crate) max_pos: Position2D,
+pub struct Map2D<K: DistributionKey, P: PositionKey> {
+    pub tiles: Vec<ThreadsafeNodeRef<K, P>>,
+    position_index: HashMap<Position2D<P>, ThreadsafeNodeRef<K, P>>,
+    pub undecided_tiles: HashMap<Position2D<P>, ThreadsafeNodeRef<K, P>>,
+    pub(crate) min_pos: Position2D<P>,
+    pub(crate) max_pos: Position2D<P>,
 }
 
-impl<N: DistributionKey> Map2D<N> {
-    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<N>>>(tiles: I) -> Map2D<N> {
+impl<K: DistributionKey, P: PositionKey> Map2D<K, P> {
+    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<K, P>>>(tiles: I) -> Map2D<K, P> {
         let iterator = tiles.into_iter();
         let size_estimate = iterator.size_hint().1.unwrap_or( iterator.size_hint().0);
 
-        let mut tile_vec: Vec<ThreadsafeNodeRef<N>> = Vec::with_capacity(size_estimate);
-        let mut position_hashmap: HashMap<Position2D, ThreadsafeNodeRef<N>> = HashMap::with_capacity(size_estimate);
-        let mut undecided_hashmap: HashMap<Position2D, ThreadsafeNodeRef<N>> = HashMap::with_capacity(size_estimate);
+        let mut tile_vec: Vec<ThreadsafeNodeRef<K, P>> = Vec::with_capacity(size_estimate);
+        let mut position_hashmap: HashMap<Position2D<P>, ThreadsafeNodeRef<K, P>> = HashMap::with_capacity(size_estimate);
+        let mut undecided_hashmap: HashMap<Position2D<P>, ThreadsafeNodeRef<K, P>> = HashMap::with_capacity(size_estimate);
         let mut minx = None;
         let mut miny = None;
         let mut maxx = None;
@@ -240,10 +272,10 @@ impl<N: DistributionKey> Map2D<N> {
             let tile_arc_reader = tile_arc.read().unwrap();
             let tile_pos = tile_arc_reader.position;
 
-            if tile_pos.x < minx.unwrap_or(i64::MAX) { minx = Some(tile_pos.x) };
-            if tile_pos.y < miny.unwrap_or(i64::MAX) { miny = Some(tile_pos.y) };
-            if tile_pos.x > maxx.unwrap_or(i64::MIN) { maxx = Some(tile_pos.x) };
-            if tile_pos.y > maxy.unwrap_or(i64::MIN) { maxy = Some(tile_pos.y) };
+            if tile_pos.x < minx.unwrap_or(P::max_value()) { minx = Some(tile_pos.x) };
+            if tile_pos.y < miny.unwrap_or(P::max_value()) { miny = Some(tile_pos.y) };
+            if tile_pos.x > maxx.unwrap_or(P::min_value()) { maxx = Some(tile_pos.x) };
+            if tile_pos.y > maxy.unwrap_or(P::min_value()) { maxy = Some(tile_pos.y) };
 
             tile_vec.push(tile_arc.to_owned());
             position_hashmap.insert(tile_pos, tile_arc.to_owned());
@@ -258,17 +290,17 @@ impl<N: DistributionKey> Map2D<N> {
             position_index: position_hashmap,
             undecided_tiles: undecided_hashmap,
             min_pos: Position2D::new(
-                minx.unwrap_or(maxx.unwrap_or(0)),
-                miny.unwrap_or(maxy.unwrap_or(0))
+                minx.unwrap_or(maxx.unwrap_or(P::zero())),
+                miny.unwrap_or(maxy.unwrap_or(P::zero()))
             ),
             max_pos: Position2D::new(
-                maxx.unwrap_or(minx.unwrap_or(0)),
-                maxy.unwrap_or(miny.unwrap_or(0))
+                maxx.unwrap_or(minx.unwrap_or(P::zero())),
+                maxy.unwrap_or(miny.unwrap_or(P::zero()))
             )
         }
     }
 
-    pub fn adjacent_cardinal_from_pos(&self, pos: Position2D) -> ArrayVec<ThreadsafeNodeRef<N>, 4> {
+    pub fn adjacent_cardinal_from_pos(&self, pos: Position2D<P>) -> ArrayVec<ThreadsafeNodeRef<K, P>, 4> {
         pos
         .adjacents_cardinal()
         .into_iter()
@@ -281,11 +313,11 @@ impl<N: DistributionKey> Map2D<N> {
         ).collect()
     }
 
-    pub fn adjacent_cardinal(&self, node: &Map2DNode<N>) -> ArrayVec<ThreadsafeNodeRef<N>, 4> {
+    pub fn adjacent_cardinal(&self, node: &Map2DNode<K, P>) -> ArrayVec<ThreadsafeNodeRef<K, P>, 4> {
         self.adjacent_cardinal_from_pos(node.position)
     }
 
-    pub fn adjacent_octile_from_pos(&self, pos: Position2D) -> ArrayVec<ThreadsafeNodeRef<N>, 8> {
+    pub fn adjacent_octile_from_pos(&self, pos: Position2D<P>) -> ArrayVec<ThreadsafeNodeRef<K, P>, 8> {
         pos
         .adjacents_octile()
         .into_iter()
@@ -298,15 +330,15 @@ impl<N: DistributionKey> Map2D<N> {
         ).collect()
     }
 
-    pub fn adjacent_octile(&self, node: &Map2DNode<N>) -> ArrayVec<ThreadsafeNodeRef<N>, 8> {
+    pub fn adjacent_octile(&self, node: &Map2DNode<K, P>) -> ArrayVec<ThreadsafeNodeRef<K, P>, 8> {
         self.adjacent_octile_from_pos(node.position)
     }
 
-    pub fn get(&self, key: Position2D) -> Option<&ThreadsafeNodeRef<N>> {
+    pub fn get(&self, key: Position2D<P>) -> Option<&ThreadsafeNodeRef<K, P>> {
         self.position_index.get(&key)
     }
 
-    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<N>, assignment: N) -> Option<&ThreadsafeNodeRef<N>> {
+    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<K, P>, assignment: K) -> Option<&ThreadsafeNodeRef<K, P>> {
         let tile_writer = tile.write();
         match tile_writer {
             Ok(mut writeable) => {

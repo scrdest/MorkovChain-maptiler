@@ -3,12 +3,12 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::Error;
 use std::path::Path;
-
-use itertools::Itertools;
+use std::usize;
+use num::{NumCast};
 use serde::{Serialize, Deserialize};
 
 use crate::assigner::{MapColoringAssigner, MapColoringJob};
-use crate::map2d::{Map2D, Map2DNode, Position2D};
+use crate::map2d::{Map2D, Map2DNode, Position2D, PositionKey};
 use crate::mapgen_presets;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use crate::visualizers::{MapColor, MapVisualizer, RilPixelVisualizer};
@@ -18,7 +18,7 @@ use crate::visualizers::{MapColor, MapVisualizer, RilPixelVisualizer};
 pub struct GeneratorRuleset<A: DistributionKey> {
     layout_rules: MapColoringAssigner<A>,
     coloring_rules: HashMap<A, MapColor>,
-    map_size: i32,
+    pub(crate) map_size: u32,
     comments: Option<String>
 }
 
@@ -26,13 +26,13 @@ impl<A: DistributionKey> GeneratorRuleset<A> {
     pub fn new(
         layout: MapColoringAssigner<A>,
         coloring: HashMap<A, MapColor>,
-        map_size: Option<i32>
+        map_size: Option<u32>
     ) -> Self {
 
         Self {
             layout_rules: layout,
             coloring_rules: coloring,
-            map_size: map_size.unwrap_or(60),
+            map_size: map_size.unwrap_or(60u32),
             comments: None
         }
     }
@@ -51,8 +51,8 @@ impl<A: DistributionKey> Into<HashMap<A, MapColor>> for GeneratorRuleset<A> {
     }
 }
 
-impl<'a, 'b> From<(&'a str, &'b str, Option<i32>)> for GeneratorRuleset<i8> {
-    fn from(value: (&'a str, &'b str, Option<i32>)) -> Self {
+impl<'a, 'b> From<(&'a str, &'b str, Option<u32>)> for GeneratorRuleset<i8> {
+    fn from(value: (&'a str, &'b str, Option<u32>)) -> Self {
         let colormap_path = value.0;
         let ruleset_path = value.1;
         let map_size = value.2;
@@ -71,8 +71,8 @@ impl<'a, 'b> From<(&'a str, &'b str, Option<i32>)> for GeneratorRuleset<i8> {
     }
 }
 
-impl<'a, 'b> From<(&'a str, &'b str, i32)> for GeneratorRuleset<i8> {
-    fn from(value: (&'a str, &'b str, i32)) -> Self {
+impl<'a, 'b> From<(&'a str, &'b str, u32)> for GeneratorRuleset<i8> {
+    fn from(value: (&'a str, &'b str, u32)) -> Self {
         Self::from((value.0, value.1, Some(value.2)))
     }
 }
@@ -111,8 +111,9 @@ impl GeneratorRuleset<i8> {
 }
 
 impl GeneratorRuleset<i8> {
-    pub fn generate_with_visualizer<V: MapVisualizer<i8>>(&self, visualiser: V) {
-        let map_size = self.map_size;
+    pub fn generate_with_visualizer<P: PositionKey + NumCast, V: MapVisualizer<i8, P>>(&self, visualiser: V) {
+        let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
+        let map_size = P::from(self.map_size).unwrap_or(P::max_value());
         let assignment_rules = self.layout_rules.to_owned();
         let colormap: HashMap<i8, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
@@ -121,11 +122,21 @@ impl GeneratorRuleset<i8> {
             )
         ).collect();
 
-        let tile_positions = (0..map_size).cartesian_product(0..map_size);
-        let test_tiles = tile_positions.map(
+        let mut tile_positions = Vec::with_capacity(map_usize * map_usize);
+        for pos_x in num::range(P::zero(), map_size) {
+            for pos_y in num::range(P::zero(), map_size) {
+                tile_positions.push((pos_x, pos_y))
+            }
+        }
+        let test_tiles = tile_positions.iter().map(
             |(x, y)| Map2DNode::with_possibilities(
-                Position2D::new(i64::from(x), i64::from(y)),
-                MultinomialDistribution::uniform_over(colormap.keys().into_iter().map(|k| k.to_owned()))
+                Position2D::new(
+                    P::from(x.to_owned()).unwrap(),
+                    P::from(y.to_owned()).unwrap()
+                ),
+                MultinomialDistribution::uniform_over(
+                    colormap.keys().into_iter().map(|k| k.to_owned())
+                )
             )
         );
         let testmap = Map2D::from_tiles(test_tiles);
@@ -136,8 +147,8 @@ impl GeneratorRuleset<i8> {
         visualiser.visualise(map_reader);
     }
 
-    pub fn generate<'a>(&self) {
+    pub fn generate<'a, P: PositionKey + NumCast + Into<u32>>(&self) {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer(visualizer)
+        self.generate_with_visualizer::<P, RilPixelVisualizer<i8>>(visualizer)
     }
 }

@@ -4,101 +4,101 @@ use crate::assigner::MapColoringAssigner;
 use crate::sampler::MultinomialDistribution;
 use super::visualizers::MapColor;
 
-pub(crate) const NULL_NAME: i8 = 0;
-pub(crate) const CORRIDOR: i8 = 1;
-pub(crate) const WALL: i8 = 2;
-pub(crate) const SPACE: i8 = 3;
-pub(crate) const DOOR: i8 = 4;
+// pub(crate) const NULL_NAME: i8 = 0;
+// pub(crate) const CORRIDOR: i8 = 1;
+// pub(crate) const WALL: i8 = 2;
+// pub(crate) const SPACE: i8 = 3;
+// pub(crate) const DOOR: i8 = 4;
 
 pub const TUNNELS_COLORMAP_FILENAME: &str = "morkovmap_colormap_tunnel.json";
 pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 
 
-fn tunnels_generate_colormap() -> HashMap<i8, MapColor> {
-    let colormap: HashMap<i8, MapColor> = HashMap::from_iter([
-        (CORRIDOR, ril::Rgb::new(100, 110, 115).into()),
-        // (tunnel_name_mapping("entryway"), ril::Rgb::new(70, 180, 70).into()),
-        // (tunnel_name_mapping("room"), ril::Rgb::new(70, 160, 70).into()),
-        (WALL, ril::Rgb::new(50, 50, 60).into()),
-        // (tunnel_name_mapping("door"), ril::Rgb::new(190, 140, 70).into()),
-        (SPACE, ril::Rgb::new(5, 5, 10).into()),
-        // (tunnel_name_mapping("window"), ril::Rgb::new(50, 150, 200).into()),
-    ]);
-    colormap
-}
-
-
-fn tunnels_generate_rules() -> MapColoringAssigner<i8> {
-    let colormap = read_colormap(TUNNELS_COLORMAP_FILENAME);
-    let rules = HashMap::from([
-        // undecided
-        (NULL_NAME, MultinomialDistribution::uniform_over(colormap.keys().into_iter().map(|k| k.to_owned()))),
-        // corridor floor
-        (CORRIDOR, MultinomialDistribution::from(
-            HashMap::from([
-                (CORRIDOR, 5.),
-                // (tunnel_name_mapping("entryway"), 1.),
-                // (tunnel_name_mapping("room"), 5.),
-                (WALL, 3.),
-            ])
-        )),
-        // entryway floor
-        // (tunnel_name_mapping("entryway"), MultinomialDistribution::from(
-        //     HashMap::from([
-        //         (CORRIDOR, 10.),
-        //         (tunnel_name_mapping("entryway"), 1.),
-        //         (tunnel_name_mapping("room"), 1.),
-        //         (WALL, 2.),
-        //         (tunnel_name_mapping("door"), 50.),
-        //     ])
-        // )),
-        // inner floor
-        // (tunnel_name_mapping("room"), MultinomialDistribution::from(
-        //     HashMap::from([
-        //         (tunnel_name_mapping("entryway"), 10.),
-        //         (tunnel_name_mapping("room"), 1.),
-        //     ])
-        // )),
-        // walls
-        (WALL, MultinomialDistribution::from(
-            HashMap::from([
-                (CORRIDOR, 15.),
-                // (tunnel_name_mapping("room"), 0.000001),
-                // (tunnel_name_mapping("entryway"), 0.000001),
-                (WALL, 5.),
-                (DOOR, 5.),
-                (SPACE, 15.),
-            ])
-        )),
-        // door
-        (DOOR, MultinomialDistribution::from(
-            HashMap::from([
-                (CORRIDOR, 8.),
-                (WALL, 2.),
-                // (tunnel_name_mapping("window"), 1.),
-            ])
-        )),
-        // space
-        (SPACE, MultinomialDistribution::from(
-            HashMap::from([
-                (WALL, 1.),
-                (SPACE, 20.),
-                // (tunnel_name_mapping("window"), 1.),
-            ])
-        )),
-        // glass
-        // (tunnel_name_mapping("window"), MultinomialDistribution::from(
-        //     HashMap::from([
-        //         (CORRIDOR, 2.),
-        //         (WALL, 2.),
-        //         SPACE, 4.),
-        //         (tunnel_name_mapping("window"), 2.),
-        //     ])
-        // )),
-    ]);
-
-    MapColoringAssigner::with_rules(rules)
-}
+// fn tunnels_generate_colormap() -> HashMap<i8, MapColor> {
+//     let colormap: HashMap<i8, MapColor> = HashMap::from_iter([
+//         (CORRIDOR, ril::Rgb::new(100, 110, 115).into()),
+//         // (tunnel_name_mapping("entryway"), ril::Rgb::new(70, 180, 70).into()),
+//         // (tunnel_name_mapping("room"), ril::Rgb::new(70, 160, 70).into()),
+//         (WALL, ril::Rgb::new(50, 50, 60).into()),
+//         // (tunnel_name_mapping("door"), ril::Rgb::new(190, 140, 70).into()),
+//         (SPACE, ril::Rgb::new(5, 5, 10).into()),
+//         // (tunnel_name_mapping("window"), ril::Rgb::new(50, 150, 200).into()),
+//     ]);
+//     colormap
+// }
+//
+//
+// fn tunnels_generate_rules() -> MapColoringAssigner<i8> {
+//     let colormap = read_colormap(TUNNELS_COLORMAP_FILENAME);
+//     let rules = HashMap::from([
+//         // undecided
+//         (NULL_NAME, MultinomialDistribution::uniform_over(colormap.keys().into_iter().map(|k| k.to_owned()))),
+//         // corridor floor
+//         (CORRIDOR, MultinomialDistribution::from(
+//             HashMap::from([
+//                 (CORRIDOR, 5.),
+//                 // (tunnel_name_mapping("entryway"), 1.),
+//                 // (tunnel_name_mapping("room"), 5.),
+//                 (WALL, 3.),
+//             ])
+//         )),
+//         // entryway floor
+//         // (tunnel_name_mapping("entryway"), MultinomialDistribution::from(
+//         //     HashMap::from([
+//         //         (CORRIDOR, 10.),
+//         //         (tunnel_name_mapping("entryway"), 1.),
+//         //         (tunnel_name_mapping("room"), 1.),
+//         //         (WALL, 2.),
+//         //         (tunnel_name_mapping("door"), 50.),
+//         //     ])
+//         // )),
+//         // inner floor
+//         // (tunnel_name_mapping("room"), MultinomialDistribution::from(
+//         //     HashMap::from([
+//         //         (tunnel_name_mapping("entryway"), 10.),
+//         //         (tunnel_name_mapping("room"), 1.),
+//         //     ])
+//         // )),
+//         // walls
+//         (WALL, MultinomialDistribution::from(
+//             HashMap::from([
+//                 (CORRIDOR, 15.),
+//                 // (tunnel_name_mapping("room"), 0.000001),
+//                 // (tunnel_name_mapping("entryway"), 0.000001),
+//                 (WALL, 5.),
+//                 (DOOR, 5.),
+//                 (SPACE, 15.),
+//             ])
+//         )),
+//         // door
+//         (DOOR, MultinomialDistribution::from(
+//             HashMap::from([
+//                 (CORRIDOR, 8.),
+//                 (WALL, 2.),
+//                 // (tunnel_name_mapping("window"), 1.),
+//             ])
+//         )),
+//         // space
+//         (SPACE, MultinomialDistribution::from(
+//             HashMap::from([
+//                 (WALL, 1.),
+//                 (SPACE, 20.),
+//                 // (tunnel_name_mapping("window"), 1.),
+//             ])
+//         )),
+//         // glass
+//         // (tunnel_name_mapping("window"), MultinomialDistribution::from(
+//         //     HashMap::from([
+//         //         (CORRIDOR, 2.),
+//         //         (WALL, 2.),
+//         //         SPACE, 4.),
+//         //         (tunnel_name_mapping("window"), 2.),
+//         //     ])
+//         // )),
+//     ]);
+//
+//     MapColoringAssigner::with_rules(rules)
+// }
 
 
 pub(crate) const WATER: i8 = 1;
