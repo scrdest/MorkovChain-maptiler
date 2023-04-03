@@ -1,7 +1,8 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use num::NumCast;
-use crate::map2d::{Map2D, PositionKey};
+use crate::map2d::{Map2D, MapNodeState, PositionKey};
 use crate::sampler::DistributionKey;
 use ril;
 use ril::{Draw, Rgb};
@@ -94,7 +95,10 @@ impl<N: DistributionKey, P: PositionKey + NumCast + Into<u32>> MapVisualizer<N, 
 
         for tile in &map.tiles {
             let tilereader = tile.read().unwrap();
-            if tilereader.assignment.is_none() { continue; }
+            let assignment = match &tilereader.state {
+                MapNodeState::Finalized(asgn) => asgn,
+                MapNodeState::Undecided(_) => continue
+            };
             let tilepos = tilereader.position;
 
             let tilepos_x_relative = (tilepos.x - map.min_pos.x) * P::from(MAP_SCALE_FACTOR).unwrap();
@@ -106,18 +110,17 @@ impl<N: DistributionKey, P: PositionKey + NumCast + Into<u32>> MapVisualizer<N, 
             let tilepos_x_relative_cast: u32 = tilepos_x_relative.into();
             let tilepos_y_relative_cast: u32 = tilepos_y_relative.into();
 
-            let fillcolor = self.color_lookup.get(
-                // We can unwrap here since we checked earlier it's not None.
-                &tilereader.assignment.unwrap()
-            ).map(|mc|
-                // Convert to Rgb...
-                mc.to_owned().into()
-            ).unwrap_or(
+            let fillcolor = self.color_lookup
+                .get(assignment)
+                .map(|mc|
+                    // Convert to Rgb...
+                    mc.to_owned().into()
+                ).unwrap_or(
                 // ...or default if we have no color spec.
                 Rgb::white()
             );
 
-            //println!("{:?} => {:?}", tilepos, &tilereader.assignment);
+            // println!("{:?} => {:?}", tilepos, assignment);
 
             let repr: ril::Rectangle<ril::Rgb> = ril::Rectangle::new()
                 .with_size(MAP_SCALE_FACTOR, MAP_SCALE_FACTOR)

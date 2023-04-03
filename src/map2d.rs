@@ -1,19 +1,13 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Add;
 use std::sync::{Arc, RwLock};
-use super::sampler::{MultinomialDistribution, DistributionKey};
+use crate::sampler::{MultinomialDistribution, DistributionKey};
 use arrayvec::ArrayVec;
 use serde::{Serialize, Deserialize};
 
-// #[derive(Hash, Eq, PartialEq, Copy, Clone, Ord, PartialOrd)]
-// enum PositionValue {
-//     I16(i16, i16),
-//     I32(i32, i32),
-//     I64(i64, i64),
-//     I128(i128, i128),
-// }
 
 pub trait PositionKey: Copy + Clone + Add<Output = Self> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded {}
 impl<P: Copy + Clone + Add<Output = P> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded> PositionKey for P {}
@@ -128,35 +122,67 @@ impl<P: PositionKey> Position2D<P> {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum MapNodeState<K: DistributionKey> {
+    Undecided(MultinomialDistribution<K>),
+    Finalized(K)
+}
+
+impl<K: DistributionKey> MapNodeState<K> {
+    pub fn undecided(possibilities: MultinomialDistribution<K>) -> Self {
+        Self::Undecided(possibilities)
+    }
+
+    pub fn finalized(assignment: K) -> Self {
+        Self::Finalized(assignment)
+    }
+
+    pub fn is_assigned(&self) -> bool {
+        match self {
+            Self::Undecided(_) => false,
+            Self::Finalized(_) => true
+        }
+    }
+}
+
+impl<K: DistributionKey> From<MultinomialDistribution<K>> for MapNodeState<K> {
+    fn from(value: MultinomialDistribution<K>) -> Self {
+        Self::undecided(value)
+    }
+}
+
+impl<K: DistributionKey> From<K> for MapNodeState<K> {
+    fn from(value: K) -> Self {
+        Self::finalized(value)
+    }
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Map2DNode<K: DistributionKey, P: PositionKey> {
     pub(crate) position: Position2D<P>,
-    pub(crate) possibilities: MultinomialDistribution<K>,
-    pub(crate) assignment: Option<K>
+    pub(crate) state: MapNodeState<K>,
 }
 
 impl<K: DistributionKey, P: PositionKey> Map2DNode<K, P> {
     pub fn with_possibilities(position: Position2D<P>, possibilities: MultinomialDistribution<K>) -> Self<> {
         Self {
             position,
-            possibilities,
-            assignment: None
+            state: MapNodeState::undecided(possibilities)
         }
     }
 
     pub fn with_assignment(position: Position2D<P>, assignment: K) -> Self<> {
         Self {
             position,
-            possibilities: MultinomialDistribution::uniform_over(vec![]),
-            assignment: Some(assignment)
+            state: MapNodeState::finalized(assignment)
         }
     }
 
     pub fn entropy(&self) -> f32 {
-        match &self.assignment {
-            Some(_) => f32::INFINITY,
-            None => self.possibilities.entropy()
+        match &self.state {
+            MapNodeState::Finalized(_) => f32::INFINITY,
+            MapNodeState::Undecided(possibilities) => possibilities.entropy()
         }
     }
 }
@@ -257,7 +283,7 @@ pub struct Map2D<K: DistributionKey, P: PositionKey> {
 impl<K: DistributionKey, P: PositionKey> Map2D<K, P> {
     pub fn from_tiles<I: IntoIterator<Item=Map2DNode<K, P>>>(tiles: I) -> Map2D<K, P> {
         let iterator = tiles.into_iter();
-        let size_estimate = iterator.size_hint().1.unwrap_or( iterator.size_hint().0);
+        let size_estimate = iterator.size_hint().0;
 
         let mut tile_vec: Vec<ThreadsafeNodeRef<K, P>> = Vec::with_capacity(size_estimate);
         let mut position_hashmap: HashMap<Position2D<P>, ThreadsafeNodeRef<K, P>> = HashMap::with_capacity(size_estimate);
@@ -280,7 +306,7 @@ impl<K: DistributionKey, P: PositionKey> Map2D<K, P> {
             tile_vec.push(tile_arc.to_owned());
             position_hashmap.insert(tile_pos, tile_arc.to_owned());
 
-            if tile_arc_reader.assignment.is_none() {
+            if !tile_arc_reader.state.is_assigned() {
                 undecided_hashmap.insert(tile_pos, tile_arc.to_owned());
             }
         }
@@ -342,7 +368,7 @@ impl<K: DistributionKey, P: PositionKey> Map2D<K, P> {
         let tile_writer = tile.write();
         match tile_writer {
             Ok(mut writeable) => {
-                writeable.assignment = Some(assignment);
+                writeable.state = MapNodeState::finalized(assignment);
                 let removed = self.undecided_tiles.remove(&writeable.position);
                 match removed {
                     Some(_) => Some(tile),

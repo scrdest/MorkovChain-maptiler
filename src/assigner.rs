@@ -2,7 +2,7 @@ use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref};
 use std::sync::{Arc, RwLock};
-use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeWrapper, PositionKey};
+use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper, PositionKey};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use serde::{Serialize, Deserialize};
 
@@ -61,12 +61,13 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
 
         for tile_lock in map_reader.undecided_tiles.values() {
             let tile_reader = tile_lock.read().unwrap();
+            let is_assigned = tile_reader.state.is_assigned();
+            if is_assigned {continue};
+
             let tile = tile_reader.deref().to_owned();
-            let is_none = tile.assignment.is_none().to_owned();
             let ord_tile = MapNodeEntropyOrdering::from(tile);
-            if is_none {
-                queue_writer.push(ord_tile);
-            }
+
+            queue_writer.push(ord_tile);
             break; // we only want the first uninitialized element
         }
         self.queue_state = QueueState::Initialized;
@@ -97,13 +98,26 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
                 MapNodeWrapper::Arc(node) => node.to_owned(),
             };
             let mut node = raw_node.write().unwrap();
-            let possibilities = &node.possibilities;
+            let node_state = &node.state.to_owned();
+            enqueued.remove(&node.position);
+            map_operator.undecided_tiles.remove(&node.position);
+
+            let possibilities = match node_state {
+                MapNodeState::Undecided(probas) => probas,
+                MapNodeState::Finalized(_) => {
+                    continue
+                }
+            };
 
             let new_assignment = possibilities.sample_with_default_rng();
-            // println!("Assigning {:?} => {:?}", node, new_assignment);
+            // println!("Assigning {:?} => {:?}", node.position, new_assignment);
 
-            node.assignment = Some(new_assignment);
-            map_operator.undecided_tiles.remove(&node.position);
+            let self_rule_probas = match self.rules.transition_rules.get(&new_assignment) {
+                Some(probas) => probas,
+                None => continue
+            };
+
+            node.state = MapNodeState::from(new_assignment);
 
             let neighbors = map_operator.adjacent_octile(&node);
             drop(node);
@@ -112,19 +126,19 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
                 let mut neighbor_writer = neighbor.write().unwrap();
 
-                if neighbor_writer.assignment.is_some() { continue };
+                let neighbor_rule_probas = match &neighbor_writer.state {
+                    MapNodeState::Undecided(probas) => probas,
+                    MapNodeState::Finalized(_) => continue
+                };
 
-                let raw_rule_probas = self.rules.transition_rules.get(&new_assignment);
-                if raw_rule_probas.is_none() {continue;}
-
-                let rule_probas = raw_rule_probas.unwrap();
-                let new_possibilities = rule_probas.joint_probability(&neighbor_writer.possibilities);
-                neighbor_writer.possibilities = new_possibilities;
+                let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
+                neighbor_writer.state = MapNodeState::from(new_possibilities);
                 //println!("Assigned new probas for neighbor {:?}!", neighbor);
 
                 let neigh_pos = neighbor_writer.position;
-                let neigh_queued = enqueued.get(&neigh_pos).is_some();
                 drop(neighbor_writer);
+
+                let neigh_queued = enqueued.get(&neigh_pos).is_some();
 
                 if !neigh_queued {
                     let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
