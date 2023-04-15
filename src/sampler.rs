@@ -21,8 +21,8 @@ use serde::{Serialize, Deserialize};
 //     }
 // }
 
-pub trait  DistributionKey: Copy + Eq + Hash + Debug + Default {}
-impl<T: Copy + Eq + Hash + Debug + Default> DistributionKey for T {}
+pub trait DistributionKey: Copy + Eq + Hash + Debug + Default + Serialize {}
+impl<T: Copy + Eq + Hash + Debug + Default + Serialize> DistributionKey for T {}
 
 // pub trait Sample<K: DistributionKey> {
 //     fn sample(&self) -> Option<K>;

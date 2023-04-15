@@ -1,12 +1,15 @@
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
-use std::ops::{Deref};
-use std::sync::{Arc, RwLock};
-use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper, PositionKey};
+use std::hash::Hash;
+use std::sync::{Arc, RwLock, RwLockReadGuard};
+use crate::map2d::{MapNodeWrapper, ThreadsafeNodeRef};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use crate::map::{MapNode, TileMap};
+use crate::map_node_ordering::MapNodeEntropyOrdering;
+use crate::map_node_state::MapNodeState;
 
-type Queue<K, P> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K, P>>>>;
+type Queue<'a, const DIMS: usize, MN> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<'a, DIMS, MN>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -31,16 +34,17 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct MapColoringJob<K: DistributionKey, P: PositionKey> {
-    rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<K, P>>>,
-    queue: Queue<K, P>,
-    queue_state: QueueState
+// #[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
+pub struct MapColoringJob<'a, const DIMS: usize, MN: MapNode<'a, DIMS> + 'a, ARMN: AsRef<MN> + MapNode<'a, DIMS>, M: TileMap<'a, DIMS, MN>> {
+    rules: MapColoringAssigner<MN::Assignment>,
+    pub map: Arc<RwLock<M>>,
+    queue: Queue<'a, DIMS, ARMN>,
+    queue_state: QueueState,
 }
 
-impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
-    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
+impl<'a, const DIMS: usize, MN: MapNode<'a, DIMS> + Eq + Hash, M: TileMap<'a, DIMS, MN>> MapColoringJob<'a, DIMS, MN, ThreadsafeNodeRef<'a, DIMS, MN>, M> {
+    pub fn new(rules: MapColoringAssigner<MN::Assignment>, map: M) -> Self {
         let wrapped_map = Arc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
@@ -50,22 +54,23 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
             rules,
             map: wrapped_map,
             queue: wrapped_queue,
-            queue_state: QueueState::Uninitialized
+            queue_state: QueueState::Uninitialized,
         }
     }
 
-    fn build_queue(&mut self) -> &Queue<K, P> {
-        let map_reader = self.map.read().unwrap();
+    fn build_queue(&'a mut self) -> &Queue<DIMS, ThreadsafeNodeRef<'a, DIMS, MN>> {
+        let map_reader: RwLockReadGuard<M> = self.map.read().unwrap();
         let wrapped_queue = &self.queue;
         let mut queue_writer = wrapped_queue.write().unwrap();
 
-        for tile_lock in map_reader.undecided_tiles.values() {
+        for raw_tile_lock in map_reader.get_unassigned().values() {
+            let tile_lock: &ThreadsafeNodeRef<DIMS, MN> = raw_tile_lock;
             let tile_reader = tile_lock.read().unwrap();
-            let is_assigned = tile_reader.state.is_assigned();
+            let is_assigned = tile_reader.get_state().is_assigned();
             if is_assigned {continue};
 
-            let tile = tile_reader.deref().to_owned();
-            let ord_tile = MapNodeEntropyOrdering::from(tile);
+            let tile = tile_reader.to_owned();
+            let ord_tile = MapNodeEntropyOrdering::from(raw_tile_lock.to_owned());
 
             queue_writer.push(ord_tile);
             break; // we only want the first uninitialized element
@@ -74,18 +79,23 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
         wrapped_queue
     }
 
-    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
+    pub fn new_with_queue(rules: MapColoringAssigner<MN::Assignment>, map: M) -> Self {
         let mut inst = Self::new(rules, map);
         inst.build_queue();
         inst
     }
+}
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
+impl<'a, const DIMS: usize, MN: MapNode<'a, DIMS> + Eq + Hash, M: TileMap<'a, DIMS, MN>> MapColoringJob<'a, DIMS, MN, ThreadsafeNodeRef<'a, DIMS, MN>, M>
+where
+{
+    pub fn assign_map(&mut self) -> &Arc<RwLock<M>> {
         let mut queue_writer = self.queue.write().unwrap();
-        let map = &self.map;
+        let map: &Arc<RwLock<M>> = &self.map;
         let mut map_operator = map.write().unwrap();
+        let unassigned = map_operator.get_unassigned();
 
-        let mut enqueued = HashSet::with_capacity(map_operator.undecided_tiles.len());
+        let mut enqueued = HashSet::with_capacity(unassigned.len());
         match queue_writer.peek() {
             Some(enqueued_node) => enqueued.insert(enqueued_node.node.position()),
             None => false
@@ -96,11 +106,13 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
             let raw_node = match assignee {
                 MapNodeWrapper::Raw(node) => Arc::new(RwLock::new(node.to_owned())),
                 MapNodeWrapper::Arc(node) => node.to_owned(),
+                MapNodeWrapper::_Fake(_) => panic!("This should never be reachable!")
             };
             let mut node = raw_node.write().unwrap();
-            let node_state = &node.state.to_owned();
-            enqueued.remove(&node.position);
-            map_operator.undecided_tiles.remove(&node.position);
+            let mut node_state = &node.get_state().to_owned();
+            let node_pos = node.get_position();
+            enqueued.remove(&node_pos);
+            map_operator.get_unassigned().remove(&node_pos);
 
             let possibilities = match node_state {
                 MapNodeState::Undecided(probas) => probas,
@@ -117,31 +129,36 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
                 None => continue
             };
 
-            node.state = MapNodeState::from(new_assignment);
+            let mut node_state = node.get_state();
+            node_state = MapNodeState::from(new_assignment);
 
-            let neighbors = map_operator.adjacent_octile(&node);
+            let neighbors = map_operator.adjacent(&node_pos);
+            let niter = neighbors.into_iter();
             drop(node);
 
-            for neighbor in neighbors {
+            for raw_neighbor in niter {
+                let cast_neighbor: ThreadsafeNodeRef<DIMS, MN> = raw_neighbor;
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
-                let mut neighbor_writer = neighbor.write().unwrap();
+                let mut neighbor_writer = cast_neighbor.write().unwrap();
+                let mut neighbor_state = neighbor_writer.get_state();
+                let neighbor_pos = neighbor_writer.get_position();
 
-                let neighbor_rule_probas = match &neighbor_writer.state {
+                let neighbor_rule_probas = match &neighbor_writer.get_state() {
                     MapNodeState::Undecided(probas) => probas,
                     MapNodeState::Finalized(_) => continue
                 };
 
                 let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
-                neighbor_writer.state = MapNodeState::from(new_possibilities);
+                neighbor_state = MapNodeState::from(new_possibilities);
                 //println!("Assigned new probas for neighbor {:?}!", neighbor);
 
-                let neigh_pos = neighbor_writer.position;
-                drop(neighbor_writer);
+                let neigh_pos = neighbor_pos;
+                //drop(neighbor_writer);
 
                 let neigh_queued = enqueued.get(&neigh_pos).is_some();
 
                 if !neigh_queued {
-                    let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
+                    let wrapped_neighbor = MapNodeEntropyOrdering::from(cast_neighbor.to_owned());
                     queue_writer.push(wrapped_neighbor);
                 }
             }
@@ -150,7 +167,7 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
+    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<M>> {
         self.build_queue();
         self.assign_map()
     }
@@ -159,7 +176,9 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use crate::map2d::{Map2DNode, Position2D};
+    use crate::map2d::Map2D;
+    use crate::map2Dnode::Map2DNode;
+    use crate::position2d::Position2D;
     use super::*;
 
     #[test]

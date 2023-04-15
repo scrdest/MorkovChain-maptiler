@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
+use std::hash::Hash;
 use std::io::Error;
 use std::path::Path;
 use std::usize;
-use num::{NumCast};
-use serde::{Serialize, Deserialize};
+use arrayvec::ArrayVec;
+use num::NumCast;
+use serde::{Deserialize, Serialize};
 
 use crate::assigner::{MapColoringAssigner, MapColoringJob};
-use crate::map2d::{Map2D, Map2DNode, Position2D, PositionKey};
+use crate::map::{FromArrayVec, MapNode, MapPosition, PositionKey, SquishyMapPosition, TileMap};
 use crate::mapgen_presets;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use crate::visualizers::{MapColor, MapVisualizer, RilPixelVisualizer};
@@ -110,8 +112,20 @@ impl GeneratorRuleset<i8> {
     }
 }
 
-impl GeneratorRuleset<i8> {
-    pub fn generate_with_visualizer<P: PositionKey + NumCast, V: MapVisualizer<i8, P>>(&self, visualiser: V) {
+impl<'a> GeneratorRuleset<i8> {
+    pub fn generate_with_visualizer<
+        P: PositionKey + NumCast + Serialize,
+        MN: MapNode<'a, 2, Assignment=i8, PositionKey = P> + Eq + Hash + 'a,
+        M: TileMap<'a, 2, MN>,
+        V: MapVisualizer<'a, MN, M>
+    >(
+        &self,
+        visualiser: V
+    )
+    where
+        MN::Position: SquishyMapPosition<'a, 2, 8, P, u32>,
+        <<MN as MapNode<'a, 2>>::Position as FromArrayVec<2>>::Item: From<P>
+    {
         let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
         let map_size = P::from(self.map_size).unwrap_or(P::max_value());
         let assignment_rules = self.layout_rules.to_owned();
@@ -123,32 +137,56 @@ impl GeneratorRuleset<i8> {
         ).collect();
 
         let mut tile_positions = Vec::with_capacity(map_usize * map_usize);
-        for pos_x in num::range(P::zero(), map_size) {
-            for pos_y in num::range(P::zero(), map_size) {
+        let zero_pos = P::zero();
+
+        for pos_x in num::range(zero_pos, map_size) {
+            for pos_y in num::range(zero_pos, map_size) {
                 tile_positions.push((pos_x, pos_y))
             }
         }
         let test_tiles = tile_positions.iter().map(
-            |(x, y)| Map2DNode::with_possibilities(
-                Position2D::new(
-                    P::from(x.to_owned()).unwrap(),
-                    P::from(y.to_owned()).unwrap()
-                ),
+            |(x, y)| MN::with_possibilities(
+                MN::Position::from_array_vec(ArrayVec::from([
+                    MN::PositionKey::from(x.to_owned()).unwrap().into(),
+                    MN::PositionKey::from(y.to_owned()).unwrap().into()
+                ])),
                 MultinomialDistribution::uniform_over(
                     colormap.keys().into_iter().map(|k| k.to_owned())
                 )
             )
         );
-        let testmap = Map2D::from_tiles(test_tiles);
 
-        let mut job = MapColoringJob::new_with_queue(assignment_rules, testmap);
+        let tile_vec: Vec<MN> = test_tiles.collect();
+
+        let arg_tup = M::parse_tiles(&tile_vec);
+
+        let testmap = M::build(
+            &tile_vec,
+            arg_tup.0,
+            arg_tup.1,
+            arg_tup.2,
+            arg_tup.3
+        );
+
+        let mut job = MapColoringJob::new_with_queue(
+            assignment_rules,
+            testmap
+        );
         let map_result = job.queue_and_assign();
         let map_reader = &*map_result.read().unwrap();
         visualiser.visualise(map_reader);
     }
 
-    pub fn generate<'a, P: PositionKey + NumCast + Into<u32>>(&self) {
+    pub fn generate<
+        P: PositionKey + NumCast + Into<u32> + Serialize + From< < <MN as MapNode<'a, 2>>::Position as MapPosition<'a, 2, 8> >::PositionKey>,
+        MN: MapNode<'a, 2, Assignment=i8, PositionKey=P> + 'a,
+        M: TileMap<'a, 2, MN>
+    >(&self)
+    where
+        MN::Position: SquishyMapPosition<'a, 2, 8, P, u32>,
+        <<MN as MapNode<'a, 2>>::Position as FromArrayVec<2>>::Item: From<P>
+    {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<P, RilPixelVisualizer<i8>>(visualizer)
+        self.generate_with_visualizer::<P, MN, M, RilPixelVisualizer<i8>>(visualizer)
     }
 }
