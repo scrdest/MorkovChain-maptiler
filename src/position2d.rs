@@ -42,7 +42,7 @@ impl<PA: PositionKey + Add<Output = PA>> Add for Position2D<PA> {
     }
 }
 
-impl<P: PositionKey> MapPosition<2> for Position2D<P> {
+impl<P: PositionKey> MapPosition<2, 4> for Position2D<P> {
     type Key = P;
 
     fn get_dims(&self) -> [Self::Key; 2] {
@@ -56,7 +56,7 @@ impl<P: PositionKey> MapPosition<2> for Position2D<P> {
         Position2D::new(dim_x, dim_y)
     }
 
-    fn adjacents_cardinal(&self) -> ArrayVec<Self, 4> {
+    fn adjacents(&self) -> ArrayVec<Self, 4> {
         let mut adjacents: ArrayVec::<Self, 4> = ArrayVec::new();
         let type_unity: P = num::one();
         let type_three: P = type_unity + type_unity + type_unity;
@@ -77,7 +77,7 @@ impl<P: PositionKey> MapPosition<2> for Position2D<P> {
                 let mut pos_buffer = [self.x, self.y];
                 pos_buffer[dim] = pos_buffer[dim] + true_offset;
 
-                let new_pos = Self::from_dims(pos_buffer);
+                let new_pos = <Self as MapPosition<2, 4>>::from_dims(pos_buffer);
 
                 adjacents.push(new_pos);
             }
@@ -85,9 +85,23 @@ impl<P: PositionKey> MapPosition<2> for Position2D<P> {
 
         adjacents
     }
+}
 
-    fn adjacents_octile(&self) -> ArrayVec<Self, 8> {
+impl<P: PositionKey> MapPosition<2, 8> for Position2D<P> {
+    type Key = P;
 
+    fn get_dims(&self) -> [Self::Key; 2] {
+        [self.x, self.y]
+    }
+
+    fn from_dims(dims: [Self::Key; 2]) -> Self {
+        let dim_x = dims[0];
+        let dim_y = dims[1];
+
+        Position2D::new(dim_x, dim_y)
+    }
+
+    fn adjacents(&self) -> ArrayVec<Self, 8> {
         let mut adjacents: ArrayVec<Self, 8> = ArrayVec::new();
 
         let type_unity: P = P::one();
@@ -123,15 +137,33 @@ impl<P: PositionKey> MapPosition<2> for Position2D<P> {
     }
 }
 
-impl<P: PositionKey + Into<u32>> ConvertibleMapPosition<2, u32> for Position2D<P> {
+impl<P: PositionKey + Into<u32>> ConvertibleMapPosition<2, 4, u32> for Position2D<P> {
     type ConvertsTo = Position2D<u32>;
 
     fn convert(self) -> Self::ConvertsTo {
-        let dimarray = self.get_dims();
+        let dimarray: [Self::Key; 2] = <Position2D<P> as MapPosition<2, 4>>::get_dims(&self);
         let new_arr = dimarray.map(|d| {
             let new_dim: u32 = d.into();
             new_dim
         });
+
+        Position2D::new(
+            new_arr[0],
+            new_arr[1]
+        )
+    }
+}
+
+impl<P: PositionKey + Into<u32>> ConvertibleMapPosition<2, 8, u32> for Position2D<P> {
+    type ConvertsTo = Position2D<u32>;
+
+    fn convert(self) -> Self::ConvertsTo {
+        let dimarray: [Self::Key; 2] = <Position2D<P> as MapPosition<2, 8>>::get_dims(&self);
+        let new_arr = dimarray.map(|d| {
+            let new_dim: u32 = d.into();
+            new_dim
+        });
+
         Position2D::new(
             new_arr[0],
             new_arr[1]

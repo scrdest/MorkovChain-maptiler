@@ -8,29 +8,29 @@ use crate::map2dnode::{Map2DNode, MapNodeState, ThreadsafeNodeRef};
 use crate::position::{MapPosition};
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Map2D<K: DistributionKey, MP: MapPosition<2>> {
-    pub tiles: Vec<ThreadsafeNodeRef<K, MP>>,
-    position_index: HashMap<MP, ThreadsafeNodeRef<K, MP>>,
-    pub undecided_tiles: HashMap<MP, ThreadsafeNodeRef<K, MP>>,
+pub struct Map2D<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
+    pub tiles: Vec<ThreadsafeNodeRef<ADJACENTS, K, MP>>,
+    position_index: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>>,
+    pub undecided_tiles: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>>,
     pub(crate) min_pos: MP,
     pub(crate) max_pos: MP,
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> Map2D<K, MP> {
-    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<K, MP>>>(tiles: I) -> Map2D<K, MP> {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> Map2D<ADJACENTS, K, MP> {
+    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<ADJACENTS, K, MP>>>(tiles: I) -> Map2D<ADJACENTS, K, MP> {
         let iterator = tiles.into_iter();
         let size_estimate = iterator.size_hint().0;
 
-        let mut tile_vec: Vec<ThreadsafeNodeRef<K, MP>> = Vec::with_capacity(size_estimate);
-        let mut position_hashmap: HashMap<MP, ThreadsafeNodeRef<K, MP>> = HashMap::with_capacity(size_estimate);
-        let mut undecided_hashmap: HashMap<MP, ThreadsafeNodeRef<K, MP>> = HashMap::with_capacity(size_estimate);
+        let mut tile_vec: Vec<ThreadsafeNodeRef<ADJACENTS, K, MP>> = Vec::with_capacity(size_estimate);
+        let mut position_hashmap: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>> = HashMap::with_capacity(size_estimate);
+        let mut undecided_hashmap: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>> = HashMap::with_capacity(size_estimate);
         let mut minx = None;
         let mut miny = None;
         let mut maxx = None;
         let mut maxy = None;
 
         for tile in iterator {
-            let cast_tile: Map2DNode<K, MP> = tile;
+            let cast_tile: Map2DNode<ADJACENTS, K, MP> = tile;
             let tile_pos = cast_tile.position.get_dims();
 
             let tile_pos_x = tile_pos.get(0).unwrap().clone();
@@ -68,9 +68,9 @@ impl<K: DistributionKey, MP: MapPosition<2>> Map2D<K, MP> {
         }
     }
 
-    pub fn adjacent_cardinal_from_pos(&self, pos: MP) -> ArrayVec<ThreadsafeNodeRef<K, MP>, 4> {
+    pub fn adjacent_from_pos(&self, pos: MP) -> ArrayVec<ThreadsafeNodeRef<ADJACENTS, K, MP>, ADJACENTS> {
         pos
-        .adjacents_cardinal()
+        .adjacents()
         .into_iter()
         .filter_map(
             |cand| {
@@ -81,32 +81,15 @@ impl<K: DistributionKey, MP: MapPosition<2>> Map2D<K, MP> {
         ).collect()
     }
 
-    pub fn adjacent_cardinal(&self, node: &Map2DNode<K, MP>) -> ArrayVec<ThreadsafeNodeRef<K, MP>, 4> {
-        self.adjacent_cardinal_from_pos(node.position)
+    pub fn adjacent(&self, node: &Map2DNode<ADJACENTS, K, MP>) -> ArrayVec<ThreadsafeNodeRef<ADJACENTS, K, MP>, ADJACENTS> {
+        self.adjacent_from_pos(node.position)
     }
 
-    pub fn adjacent_octile_from_pos(&self, pos: MP) -> ArrayVec<ThreadsafeNodeRef<K, MP>, 8> {
-        pos
-        .adjacents_octile()
-        .into_iter()
-        .filter_map(
-            |cand| {
-                self.position_index
-                    .get(&cand)
-                    .map(|x| x.to_owned())
-            }
-        ).collect()
-    }
-
-    pub fn adjacent_octile(&self, node: &Map2DNode<K, MP>) -> ArrayVec<ThreadsafeNodeRef<K, MP>, 8> {
-        self.adjacent_octile_from_pos(node.position)
-    }
-
-    pub fn get(&self, key: MP) -> Option<&ThreadsafeNodeRef<K, MP>> {
+    pub fn get(&self, key: MP) -> Option<&ThreadsafeNodeRef<ADJACENTS, K, MP>> {
         self.position_index.get(&key)
     }
 
-    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<K, MP>, assignment: K) -> Option<&ThreadsafeNodeRef<K, MP>> {
+    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<ADJACENTS, K, MP>, assignment: K) -> Option<&ThreadsafeNodeRef<ADJACENTS, K, MP>> {
         let tile_writer = tile.write();
         match tile_writer {
             Ok(mut writeable) => {

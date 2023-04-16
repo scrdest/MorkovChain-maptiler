@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
 
-type Queue<K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K, MP>>>>;
+type Queue<const ADJACENTS: usize, K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<ADJACENTS, K, MP>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -34,15 +34,15 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MapColoringJob<K: DistributionKey, MP: MapPosition<2>> {
+pub struct MapColoringJob<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
     rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<K, MP>>>,
-    queue: Queue<K, MP>,
+    pub map: Arc<RwLock<Map2D<ADJACENTS, K, MP>>>,
+    queue: Queue<ADJACENTS, K, MP>,
     queue_state: QueueState
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
-    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K, MP>) -> Self {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> MapColoringJob<ADJACENTS, K, MP> {
+    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<ADJACENTS, K, MP>) -> Self {
         let wrapped_map = Arc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
@@ -56,7 +56,7 @@ impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
         }
     }
 
-    fn build_queue(&mut self) -> &Queue<K, MP> {
+    fn build_queue(&mut self) -> &Queue<ADJACENTS, K, MP> {
         let map_reader = self.map.read().unwrap();
         let wrapped_queue = &self.queue;
         let mut queue_writer = wrapped_queue.write().unwrap();
@@ -76,13 +76,13 @@ impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
         wrapped_queue
     }
 
-    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K, MP>) -> Self {
+    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<ADJACENTS, K, MP>) -> Self {
         let mut inst = Self::new(rules, map);
         inst.build_queue();
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K, MP>>> {
+    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<ADJACENTS, K, MP>>> {
         let mut queue_writer = self.queue.write().unwrap();
         let map = &self.map;
         let mut map_operator = map.write().unwrap();
@@ -121,7 +121,7 @@ impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
 
             node.state = MapNodeState::from(new_assignment);
 
-            let neighbors = map_operator.adjacent_octile(&node);
+            let neighbors = map_operator.adjacent(&node);
             drop(node);
 
             for neighbor in neighbors {
@@ -152,7 +152,7 @@ impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K, MP>>> {
+    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<ADJACENTS, K, MP>>> {
         self.build_queue();
         self.assign_map()
     }

@@ -41,12 +41,12 @@ impl<K: DistributionKey> From<K> for MapNodeState<K> {
 
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Map2DNode<K: DistributionKey, MP: MapPosition<2>> {
+pub struct Map2DNode<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
     pub(crate) position: MP,
     pub(crate) state: MapNodeState<K>,
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> Map2DNode<K, MP>
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> Map2DNode<ADJACENTS, K, MP>
 {
     pub fn with_possibilities(position: MP, possibilities: MultinomialDistribution<K>) -> Self {
         Self {
@@ -71,12 +71,12 @@ impl<K: DistributionKey, MP: MapPosition<2>> Map2DNode<K, MP>
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub enum MapNodeWrapper<K: DistributionKey, MP: MapPosition<2>> {
-    Raw(Map2DNode<K, MP>),
-    Arc(Arc<RwLock<Map2DNode<K, MP>>>)
+pub enum MapNodeWrapper<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
+    Raw(Map2DNode<ADJACENTS, K, MP>),
+    Arc(Arc<RwLock<Map2DNode<ADJACENTS, K, MP>>>)
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> MapNodeWrapper<K, MP>
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> MapNodeWrapper<ADJACENTS, K, MP>
 {
     pub fn position(&self) -> MP {
         match self {
@@ -87,27 +87,27 @@ impl<K: DistributionKey, MP: MapPosition<2>> MapNodeWrapper<K, MP>
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct MapNodeEntropyOrdering<K: DistributionKey, MP: MapPosition<2>> {
-    pub node: MapNodeWrapper<K, MP>
+pub struct MapNodeEntropyOrdering<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
+    pub node: MapNodeWrapper<ADJACENTS, K, MP>
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> From<Map2DNode<K, MP>> for MapNodeEntropyOrdering<K, MP> {
-    fn from(value: Map2DNode<K, MP>) -> Self {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> From<Map2DNode<ADJACENTS, K, MP>> for MapNodeEntropyOrdering<ADJACENTS, K, MP> {
+    fn from(value: Map2DNode<ADJACENTS, K, MP>) -> Self {
         Self {
             node: MapNodeWrapper::Raw(value.clone())
         }
     }
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> From<Arc<RwLock<Map2DNode<K, MP>>>> for MapNodeEntropyOrdering<K, MP> {
-    fn from(value: Arc<RwLock<Map2DNode<K, MP>>>) -> Self {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> From<Arc<RwLock<Map2DNode<ADJACENTS, K, MP>>>> for MapNodeEntropyOrdering<ADJACENTS, K, MP> {
+    fn from(value: Arc<RwLock<Map2DNode<ADJACENTS, K, MP>>>) -> Self {
         Self {
             node: MapNodeWrapper::Arc(value.clone())
         }
     }
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> PartialEq<Self> for MapNodeEntropyOrdering<K, MP> {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> PartialEq<Self> for MapNodeEntropyOrdering<ADJACENTS, K, MP> {
     fn eq(&self, other: &Self) -> bool {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
@@ -123,9 +123,9 @@ impl<K: DistributionKey, MP: MapPosition<2>> PartialEq<Self> for MapNodeEntropyO
     }
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> Eq for MapNodeEntropyOrdering<K, MP> {}
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> Eq for MapNodeEntropyOrdering<ADJACENTS, K, MP> {}
 
-impl<K: DistributionKey, MP: MapPosition<2>> PartialOrd for MapNodeEntropyOrdering<K, MP> {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> PartialOrd for MapNodeEntropyOrdering<ADJACENTS, K, MP> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
@@ -147,10 +147,10 @@ impl<K: DistributionKey, MP: MapPosition<2>> PartialOrd for MapNodeEntropyOrderi
     }
 }
 
-impl<K: DistributionKey, MP: MapPosition<2>> Ord for MapNodeEntropyOrdering<K, MP> {
+impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> Ord for MapNodeEntropyOrdering<ADJACENTS, K, MP> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
 }
 
-pub type ThreadsafeNodeRef<K, MP> = Arc<RwLock<Map2DNode<K, MP>>>;
+pub type ThreadsafeNodeRef<const ADJACENTS: usize, K, MP> = Arc<RwLock<Map2DNode<ADJACENTS, K, MP>>>;

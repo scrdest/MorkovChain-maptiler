@@ -113,11 +113,11 @@ impl GeneratorRuleset<i8> {
 }
 
 impl GeneratorRuleset<i8> {
-    pub fn generate_with_visualizer<MP: MapPosition<2>, V: MapVisualizer<i8, MP>>(&self, visualiser: V)
+    pub fn generate_with_visualizer<const ADJACENTS: usize, MP: MapPosition<2, ADJACENTS>, V: MapVisualizer<ADJACENTS, i8, MP>>(&self, visualiser: V)
         where MP::Key: PositionKey + NumCast
     {
         let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
-        let map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
+        let map_size = <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
         let assignment_rules = self.layout_rules.to_owned();
         let colormap: HashMap<i8, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
@@ -135,8 +135,8 @@ impl GeneratorRuleset<i8> {
         let test_tiles = tile_positions.iter().map(
             |(x, y)| Map2DNode::with_possibilities(
                 MP::from_dims([
-                    <<MP as MapPosition<2>>::Key as NumCast>::from(x.to_owned()).unwrap(),
-                    <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
+                    <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(x.to_owned()).unwrap(),
+                    <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(y.to_owned()).unwrap()
                 ]),
                 MultinomialDistribution::uniform_over(
                     colormap.keys().into_iter().map(|k| k.to_owned())
@@ -151,10 +151,10 @@ impl GeneratorRuleset<i8> {
         visualiser.visualise(map_reader);
     }
 
-    pub fn generate<MP: MapPosition<2>>(&self)
+    pub fn generate<const ADJACENTS: usize, MP: MapPosition<2, ADJACENTS>>(&self)
         where MP::Key: PositionKey + NumCast + Into<u32>
     {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<MP, RilPixelVisualizer<i8>>(visualizer)
+        self.generate_with_visualizer::<ADJACENTS, MP, RilPixelVisualizer<i8>>(visualizer)
     }
 }

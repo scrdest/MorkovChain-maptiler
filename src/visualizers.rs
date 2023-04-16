@@ -31,10 +31,10 @@ impl<R: Borrow<ril::Rgb>> From<R> for MapColor {
 }
 
 
-pub trait MapVisualizer<N: DistributionKey, MP: MapPosition<2>> {
+pub trait MapVisualizer<const ADJACENTS: usize, N: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
     type Output;
 
-    fn visualise(&self, map: &Map2D<N, MP>) -> Option<Self::Output>;
+    fn visualise(&self, map: &Map2D<ADJACENTS, N, MP>) -> Option<Self::Output>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,12 +68,12 @@ impl<N: DistributionKey> From<HashMap<N, MapColor>> for RilPixelVisualizer<N> {
     }
 }
 
-impl<N: DistributionKey, MP: MapPosition<2>> MapVisualizer<N, MP> for RilPixelVisualizer<N>
+impl<const ADJACENTS: usize, N: DistributionKey, MP: MapPosition<2, ADJACENTS>> MapVisualizer<ADJACENTS, N, MP> for RilPixelVisualizer<N>
 where MP::Key: PositionKey + NumCast + Into<u32>
 {
     type Output = ();
 
-    fn visualise(&self, map: &Map2D<N, MP>) -> Option<Self::Output> {
+    fn visualise(&self, map: &Map2D<ADJACENTS, N, MP>) -> Option<Self::Output> {
         const MAP_SCALE_FACTOR: u32 = 1;
 
         let min_pos = map.min_pos.get_dims();
@@ -84,11 +84,11 @@ where MP::Key: PositionKey + NumCast + Into<u32>
 
         // ASSUMPTION: NumCast will return None only for *smaller* datatypes
         // (64s should get converted with truncation, i32 by dropping the sign)
-        if xspan_raw >= <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
+        if xspan_raw >= <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
             println!("WARNING: map X-span too large, map image will be truncated!")
         }
 
-        if yspan_raw >= <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
+        if yspan_raw >= <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
             println!("WARNING: map Y-span too large, map image will be truncated!")
         }
 
@@ -111,14 +111,14 @@ where MP::Key: PositionKey + NumCast + Into<u32>
 
             let tilepos_x_relative = (
                 tilepos[0].clone() - min_pos[0].clone()
-            ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
+            ) * <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
 
             let tilepos_y_relative = (
                 tilepos[1].clone() - min_pos[1].clone()
-            ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
+            ) * <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
 
-            if tilepos_x_relative > <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
-            if tilepos_y_relative > <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
+            if tilepos_x_relative > <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
+            if tilepos_y_relative > <<MP as MapPosition<2, ADJACENTS>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
 
             let tilepos_x_relative_cast: u32 = tilepos_x_relative.into();
             let tilepos_y_relative_cast: u32 = tilepos_y_relative.into();
