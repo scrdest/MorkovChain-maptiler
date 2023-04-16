@@ -1,12 +1,14 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use num::NumCast;
-use crate::map2d::{Map2D, MapNodeState, PositionKey};
+use num::{Bounded, NumCast, One};
+use crate::map2d::Map2D;
 use crate::sampler::DistributionKey;
 use ril;
 use ril::{Draw, Rgb};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use crate::map2dnode::MapNodeState;
+use crate::position::{MapPosition, PositionKey};
 
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -29,10 +31,10 @@ impl<R: Borrow<ril::Rgb>> From<R> for MapColor {
 }
 
 
-pub trait MapVisualizer<N: DistributionKey, P: PositionKey> {
+pub trait MapVisualizer<N: DistributionKey, MP: MapPosition<2>> {
     type Output;
 
-    fn visualise<'v>(&self, map: &'v Map2D<N, P>) -> Option<Self::Output>;
+    fn visualise(&self, map: &Map2D<N, MP>) -> Option<Self::Output>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,21 +68,27 @@ impl<N: DistributionKey> From<HashMap<N, MapColor>> for RilPixelVisualizer<N> {
     }
 }
 
-impl<N: DistributionKey, P: PositionKey + NumCast + Into<u32>> MapVisualizer<N, P> for RilPixelVisualizer<N> {
+impl<N: DistributionKey, MP: MapPosition<2>> MapVisualizer<N, MP> for RilPixelVisualizer<N>
+where MP::Key: PositionKey + NumCast + Into<u32>
+{
     type Output = ();
 
-    fn visualise(&self, map: &Map2D<N, P>) -> Option<Self::Output> {
+    fn visualise(&self, map: &Map2D<N, MP>) -> Option<Self::Output> {
         const MAP_SCALE_FACTOR: u32 = 1;
-        let xspan_raw = P::one() + map.max_pos.x - map.min_pos.x;
-        let yspan_raw = P::one() + map.max_pos.y - map.min_pos.y;
+
+        let min_pos = map.min_pos.get_dims();
+        let max_pos = map.max_pos.get_dims();
+
+        let xspan_raw = MP::Key::one() + max_pos[0].clone() - min_pos[0].clone();
+        let yspan_raw = MP::Key::one() + max_pos[1].clone() - min_pos[1].clone();
 
         // ASSUMPTION: NumCast will return None only for *smaller* datatypes
         // (64s should get converted with truncation, i32 by dropping the sign)
-        if xspan_raw >= P::from(u32::MAX).unwrap_or(P::max_value()) {
+        if xspan_raw >= <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
             println!("WARNING: map X-span too large, map image will be truncated!")
         }
 
-        if yspan_raw >= P::from(u32::MAX).unwrap_or(P::max_value()) {
+        if yspan_raw >= <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {
             println!("WARNING: map Y-span too large, map image will be truncated!")
         }
 
@@ -99,13 +107,18 @@ impl<N: DistributionKey, P: PositionKey + NumCast + Into<u32>> MapVisualizer<N, 
                 MapNodeState::Finalized(asgn) => asgn,
                 MapNodeState::Undecided(_) => continue
             };
-            let tilepos = tilereader.position;
+            let tilepos = tilereader.position.get_dims();
 
-            let tilepos_x_relative = (tilepos.x - map.min_pos.x) * P::from(MAP_SCALE_FACTOR).unwrap();
-            let tilepos_y_relative = (tilepos.y - map.min_pos.y) * P::from(MAP_SCALE_FACTOR).unwrap();
+            let tilepos_x_relative = (
+                tilepos[0].clone() - min_pos[0].clone()
+            ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
 
-            if tilepos_x_relative > P::from(u32::MAX).unwrap_or(P::max_value()) {continue}
-            if tilepos_y_relative > P::from(u32::MAX).unwrap_or(P::max_value()) {continue}
+            let tilepos_y_relative = (
+                tilepos[1].clone() - min_pos[1].clone()
+            ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
+
+            if tilepos_x_relative > <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
+            if tilepos_y_relative > <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}
 
             let tilepos_x_relative_cast: u32 = tilepos_x_relative.into();
             let tilepos_y_relative_cast: u32 = tilepos_y_relative.into();

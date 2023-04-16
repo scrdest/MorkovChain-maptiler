@@ -1,3 +1,4 @@
+use crate::position2d::Position2D;
 use crate::ruleset::GeneratorRuleset;
 
 pub mod sampler;
@@ -7,6 +8,9 @@ pub mod assigner;
 pub mod mapgen_presets;
 pub mod ruleset;
 pub mod map;
+pub mod position;
+pub mod position2d;
+pub mod map2dnode;
 
 const COLORMAP_FILENAME: &str = "coloring_rules.json";
 const RULESET_FILENAME: &str = "layout_rules.json";
@@ -20,9 +24,9 @@ fn generate(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Opti
     ));
     rules.save(COMBINED_RULESET_FILENAME);
     match rules.map_size {
-        0..=254 => rules.generate::<u8>(),
-        255..=65534 => rules.generate::<u16>(),
-        _ => rules.generate::<u32>()
+        0..=254 => rules.generate::<Position2D<u8>>(),
+        255..=65534 => rules.generate::<Position2D<u16>>(),
+        _ => rules.generate::<Position2D<u32>>()
     };
 }
 
@@ -32,9 +36,9 @@ pub fn generate_from_file(ruleset_file: Option<&str>) {
     );
     match rules {
         Ok(ruleset) => match ruleset.map_size {
-            0..=254 => ruleset.generate::<u8>(),
-            255..=65534 => ruleset.generate::<u16>(),
-            _ => ruleset.generate::<u32>()
+            0..=254 => ruleset.generate::<Position2D<u8>>(),
+            255..=65534 => ruleset.generate::<Position2D<u16>>(),
+            _ => ruleset.generate::<Position2D<u32>>()
         },
         Err(e) => {
             eprintln!("{}", e);

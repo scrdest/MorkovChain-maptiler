@@ -1,12 +1,14 @@
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
-use std::ops::{Deref};
+use std::ops::Deref;
 use std::sync::{Arc, RwLock};
-use crate::map2d::{Map2D, MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper, PositionKey};
+use crate::map2d::Map2D;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
+use crate::position::{MapPosition};
 
-type Queue<K, P> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K, P>>>>;
+type Queue<K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<K, MP>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -32,15 +34,15 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MapColoringJob<K: DistributionKey, P: PositionKey> {
+pub struct MapColoringJob<K: DistributionKey, MP: MapPosition<2>> {
     rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<K, P>>>,
-    queue: Queue<K, P>,
+    pub map: Arc<RwLock<Map2D<K, MP>>>,
+    queue: Queue<K, MP>,
     queue_state: QueueState
 }
 
-impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
-    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
+impl<K: DistributionKey, MP: MapPosition<2>> MapColoringJob<K, MP> {
+    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<K, MP>) -> Self {
         let wrapped_map = Arc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
@@ -54,7 +56,7 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
         }
     }
 
-    fn build_queue(&mut self) -> &Queue<K, P> {
+    fn build_queue(&mut self) -> &Queue<K, MP> {
         let map_reader = self.map.read().unwrap();
         let wrapped_queue = &self.queue;
         let mut queue_writer = wrapped_queue.write().unwrap();
@@ -74,13 +76,13 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
         wrapped_queue
     }
 
-    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K, P>) -> Self {
+    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<K, MP>) -> Self {
         let mut inst = Self::new(rules, map);
         inst.build_queue();
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
+    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<K, MP>>> {
         let mut queue_writer = self.queue.write().unwrap();
         let map = &self.map;
         let mut map_operator = map.write().unwrap();
@@ -150,7 +152,7 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K, P>>> {
+    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<K, MP>>> {
         self.build_queue();
         self.assign_map()
     }
@@ -159,7 +161,8 @@ impl<K: DistributionKey, P: PositionKey> MapColoringJob<K, P> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use crate::map2d::{Map2DNode, Position2D};
+    use crate::map2dnode::Map2DNode;
+    use crate::position2d::Position2D;
     use super::*;
 
     #[test]
@@ -168,7 +171,10 @@ mod tests {
         let tile_positions = (0..TEST_MAP_SIZE).cartesian_product(0..TEST_MAP_SIZE);
         let test_tiles = tile_positions.map(
             |(x, y)| Map2DNode::with_possibilities(
-                Position2D::new(i64::from(x), i64::from(y)),
+                Position2D::new(
+                    i64::from(x),
+                    i64::from(y)
+                ),
                 MultinomialDistribution::uniform_over(vec![1, 2, 3])
             )
         );

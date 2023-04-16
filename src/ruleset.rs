@@ -4,12 +4,14 @@ use std::fs::File;
 use std::io::Error;
 use std::path::Path;
 use std::usize;
-use num::{NumCast};
-use serde::{Serialize, Deserialize};
+use num::{Bounded, NumCast, Zero};
+use serde::{Deserialize, Serialize};
 
 use crate::assigner::{MapColoringAssigner, MapColoringJob};
-use crate::map2d::{Map2D, Map2DNode, Position2D, PositionKey};
+use crate::map2d::Map2D;
+use crate::map2dnode::Map2DNode;
 use crate::mapgen_presets;
+use crate::position::{MapPosition, PositionKey};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use crate::visualizers::{MapColor, MapVisualizer, RilPixelVisualizer};
 
@@ -111,9 +113,11 @@ impl GeneratorRuleset<i8> {
 }
 
 impl GeneratorRuleset<i8> {
-    pub fn generate_with_visualizer<P: PositionKey + NumCast, V: MapVisualizer<i8, P>>(&self, visualiser: V) {
+    pub fn generate_with_visualizer<MP: MapPosition<2>, V: MapVisualizer<i8, MP>>(&self, visualiser: V)
+        where MP::Key: PositionKey + NumCast
+    {
         let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
-        let map_size = P::from(self.map_size).unwrap_or(P::max_value());
+        let map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
         let assignment_rules = self.layout_rules.to_owned();
         let colormap: HashMap<i8, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
@@ -123,17 +127,17 @@ impl GeneratorRuleset<i8> {
         ).collect();
 
         let mut tile_positions = Vec::with_capacity(map_usize * map_usize);
-        for pos_x in num::range(P::zero(), map_size) {
-            for pos_y in num::range(P::zero(), map_size) {
+        for pos_x in num::range(MP::Key::zero(), map_size) {
+            for pos_y in num::range(MP::Key::zero(), map_size) {
                 tile_positions.push((pos_x, pos_y))
             }
         }
         let test_tiles = tile_positions.iter().map(
             |(x, y)| Map2DNode::with_possibilities(
-                Position2D::new(
-                    P::from(x.to_owned()).unwrap(),
-                    P::from(y.to_owned()).unwrap()
-                ),
+                MP::from_dims([
+                    <<MP as MapPosition<2>>::Key as NumCast>::from(x.to_owned()).unwrap(),
+                    <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
+                ]),
                 MultinomialDistribution::uniform_over(
                     colormap.keys().into_iter().map(|k| k.to_owned())
                 )
@@ -147,8 +151,10 @@ impl GeneratorRuleset<i8> {
         visualiser.visualise(map_reader);
     }
 
-    pub fn generate<'a, P: PositionKey + NumCast + Into<u32>>(&self) {
+    pub fn generate<MP: MapPosition<2>>(&self)
+        where MP::Key: PositionKey + NumCast + Into<u32>
+    {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<P, RilPixelVisualizer<i8>>(visualizer)
+        self.generate_with_visualizer::<MP, RilPixelVisualizer<i8>>(visualizer)
     }
 }
