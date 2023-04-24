@@ -1,3 +1,4 @@
+use crate::adjacency::OctileAdjacencyGenerator;
 use crate::position2d::Position2D;
 use crate::ruleset::GeneratorRuleset;
 
@@ -11,6 +12,7 @@ pub mod map;
 pub mod position;
 pub mod position2d;
 pub mod map2dnode;
+pub mod adjacency;
 
 const COLORMAP_FILENAME: &str = "coloring_rules.json";
 const RULESET_FILENAME: &str = "layout_rules.json";
@@ -24,9 +26,9 @@ fn generate(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Opti
     ));
     rules.save(COMBINED_RULESET_FILENAME);
     match rules.map_size {
-        0..=254 => rules.generate::<8, Position2D<u8>>(),
-        255..=65534 => rules.generate::<8, Position2D<u16>>(),
-        _ => rules.generate::<8, Position2D<u32>>()
+        0..=254 => rules.generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+        255..=65534 => rules.generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+        _ => rules.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
     };
 }
 
@@ -36,9 +38,9 @@ pub fn generate_from_file(ruleset_file: Option<&str>) {
     );
     match rules {
         Ok(ruleset) => match ruleset.map_size {
-            0..=254 => ruleset.generate::<8, Position2D<u8>>(),
-            255..=65534 => ruleset.generate::<8, Position2D<u16>>(),
-            _ => ruleset.generate::<8, Position2D<u32>>()
+            0..=254 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+            255..=65534 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+            _ => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
         },
         Err(e) => {
             eprintln!("{}", e);

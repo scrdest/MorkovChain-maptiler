@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
@@ -5,10 +6,11 @@ use std::sync::{Arc, RwLock};
 use crate::map2d::Map2D;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use serde::{Deserialize, Serialize};
+use crate::adjacency::AdjacencyGenerator;
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
 
-type Queue<const ADJACENTS: usize, K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<ADJACENTS, K, MP>>>>;
+type Queue<AG, K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -34,15 +36,17 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct MapColoringJob<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
+pub struct MapColoringJob<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
     rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<ADJACENTS, K, MP>>>,
-    queue: Queue<ADJACENTS, K, MP>,
+    pub map: Arc<RwLock<Map2D<AG, K, MP>>>,
+    queue: Queue<AG, K, MP>,
     queue_state: QueueState
 }
 
-impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> MapColoringJob<ADJACENTS, K, MP> {
-    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<ADJACENTS, K, MP>) -> Self {
+impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapColoringJob<AG, K, MP>
+where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
+{
+    pub fn new(rules: MapColoringAssigner<K>, map: Map2D<AG, K, MP>) -> Self {
         let wrapped_map = Arc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
@@ -56,7 +60,7 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
         }
     }
 
-    fn build_queue(&mut self) -> &Queue<ADJACENTS, K, MP> {
+    fn build_queue(&mut self) -> &Queue<AG, K, MP> {
         let map_reader = self.map.read().unwrap();
         let wrapped_queue = &self.queue;
         let mut queue_writer = wrapped_queue.write().unwrap();
@@ -76,13 +80,14 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
         wrapped_queue
     }
 
-    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<ADJACENTS, K, MP>) -> Self {
+    pub fn new_with_queue(rules: MapColoringAssigner<K>, map: Map2D<AG, K, MP>) -> Self {
         let mut inst = Self::new(rules, map);
         inst.build_queue();
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<ADJACENTS, K, MP>>> {
+    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>>
+    {
         let mut queue_writer = self.queue.write().unwrap();
         let map = &self.map;
         let mut map_operator = map.write().unwrap();
@@ -101,8 +106,10 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
             };
             let mut node = raw_node.write().unwrap();
             let node_state = &node.state.to_owned();
-            enqueued.remove(&node.position);
-            map_operator.undecided_tiles.remove(&node.position);
+            let curr_pos = node.position;
+
+            enqueued.remove(&curr_pos);
+            map_operator.undecided_tiles.remove(&curr_pos);
 
             let possibilities = match node_state {
                 MapNodeState::Undecided(probas) => probas,
@@ -121,7 +128,7 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
 
             node.state = MapNodeState::from(new_assignment);
 
-            let neighbors = map_operator.adjacent(&node);
+            let neighbors = map_operator.adjacent(node.deref());
             drop(node);
 
             for neighbor in neighbors {
@@ -152,7 +159,7 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<ADJACENTS, K, MP>>> {
+    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>> {
         self.build_queue();
         self.assign_map()
     }
@@ -162,6 +169,7 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
 mod tests {
     use itertools::Itertools;
     use crate::map2dnode::Map2DNode;
+    use crate::OctileAdjacencyGenerator;
     use crate::position2d::Position2D;
     use super::*;
 
@@ -170,7 +178,9 @@ mod tests {
         const TEST_MAP_SIZE: i64 = 10;
         let tile_positions = (0..TEST_MAP_SIZE).cartesian_product(0..TEST_MAP_SIZE);
         let test_tiles = tile_positions.map(
-            |(x, y)| Map2DNode::with_possibilities(
+            |(x, y)| Map2DNode::<
+                OctileAdjacencyGenerator<Position2D<i64>>, i32, Position2D<i64>
+            >::with_possibilities(
                 Position2D::new(
                     i64::from(x),
                     i64::from(y)

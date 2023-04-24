@@ -1,36 +1,38 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use arrayvec::ArrayVec;
 use num::{Bounded, Zero};
 use serde::{Deserialize, Serialize};
+use crate::adjacency::{AdjacencyGenerator};
 use crate::sampler::DistributionKey;
 use crate::map2dnode::{Map2DNode, MapNodeState, ThreadsafeNodeRef};
 use crate::position::{MapPosition};
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct Map2D<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> {
-    pub tiles: Vec<ThreadsafeNodeRef<ADJACENTS, K, MP>>,
-    position_index: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>>,
-    pub undecided_tiles: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>>,
+pub struct Map2D<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
+    pub tiles: Vec<ThreadsafeNodeRef<AG, K, MP>>,
+    position_index: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>>,
+    pub undecided_tiles: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>>,
     pub(crate) min_pos: MP,
     pub(crate) max_pos: MP,
 }
 
-impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> Map2D<ADJACENTS, K, MP> {
-    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<ADJACENTS, K, MP>>>(tiles: I) -> Map2D<ADJACENTS, K, MP> {
+impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<2>> Map2D<AG, K, MP> {
+    pub fn from_tiles<I: IntoIterator<Item=Map2DNode<AG, K, MP>>>(tiles: I) -> Map2D<AG, K, MP> {
         let iterator = tiles.into_iter();
         let size_estimate = iterator.size_hint().0;
 
-        let mut tile_vec: Vec<ThreadsafeNodeRef<ADJACENTS, K, MP>> = Vec::with_capacity(size_estimate);
-        let mut position_hashmap: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>> = HashMap::with_capacity(size_estimate);
-        let mut undecided_hashmap: HashMap<MP, ThreadsafeNodeRef<ADJACENTS, K, MP>> = HashMap::with_capacity(size_estimate);
+        let mut tile_vec: Vec<ThreadsafeNodeRef<AG, K, MP>> = Vec::with_capacity(size_estimate);
+        let mut position_hashmap: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>> = HashMap::with_capacity(size_estimate);
+        let mut undecided_hashmap: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>> = HashMap::with_capacity(size_estimate);
         let mut minx = None;
         let mut miny = None;
         let mut maxx = None;
         let mut maxy = None;
 
         for tile in iterator {
-            let cast_tile: Map2DNode<ADJACENTS, K, MP> = tile;
+            let cast_tile: Map2DNode<AG, K, MP> = tile;
             let tile_pos = cast_tile.position.get_dims();
 
             let tile_pos_x = tile_pos.get(0).unwrap().clone();
@@ -68,28 +70,11 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
         }
     }
 
-    pub fn adjacent_from_pos(&self, pos: MP) -> ArrayVec<ThreadsafeNodeRef<ADJACENTS, K, MP>, ADJACENTS> {
-        pos
-        .adjacents()
-        .into_iter()
-        .filter_map(
-            |cand| {
-                self.position_index
-                    .get(&cand)
-                    .map(|x| x.to_owned())
-            }
-        ).collect()
-    }
-
-    pub fn adjacent(&self, node: &Map2DNode<ADJACENTS, K, MP>) -> ArrayVec<ThreadsafeNodeRef<ADJACENTS, K, MP>, ADJACENTS> {
-        self.adjacent_from_pos(node.position)
-    }
-
-    pub fn get(&self, key: MP) -> Option<&ThreadsafeNodeRef<ADJACENTS, K, MP>> {
+    pub fn get(&self, key: MP) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
         self.position_index.get(&key)
     }
 
-    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<ADJACENTS, K, MP>, assignment: K) -> Option<&ThreadsafeNodeRef<ADJACENTS, K, MP>> {
+    pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<AG, K, MP>, assignment: K) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
         let tile_writer = tile.write();
         match tile_writer {
             Ok(mut writeable) => {
@@ -105,10 +90,39 @@ impl<const ADJACENTS: usize, K: DistributionKey, MP: MapPosition<2, ADJACENTS>> 
     }
 }
 
+impl<K: DistributionKey, MP: MapPosition<2>, RMP: Borrow<MP> + From<MP>, AG: AdjacencyGenerator<2, Input=RMP>> Map2D<AG, K, MP> {
+    // NOTE: we're using a magic maxcap for ArrayVecs, because generics are a bane of my existence
+
+    pub fn adjacent_from_pos(&self, pos: RMP) -> ArrayVec<ThreadsafeNodeRef<AG, K, MP>, 16> {
+        let adjacents: AG::Output = MapPosition::adjacents::<RMP, AG>(pos);
+
+        let result = adjacents
+            .into_iter()
+            .filter_map(
+                |cand| {
+                    let rcand = cand.borrow();
+                    self.position_index
+                        .get(rcand)
+                        .map(|x| x.to_owned())
+                }
+            );
+
+        result.collect()
+    }
+
+    pub fn adjacent<NR: Borrow<Map2DNode<AG, K, MP>>>(&self, node: NR) -> ArrayVec<ThreadsafeNodeRef<AG, K, MP>, 16> {
+        let pos = node.borrow().position;
+        let borrowed_pos: RMP = pos.into();
+
+        self.adjacent_from_pos(borrowed_pos)
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use crate::adjacency::CardinalAdjacencyGenerator;
     use super::*;
+    use crate::position2d::Position2D;
 
     #[test]
     fn position_vector_addition_works_positives() {
@@ -131,11 +145,11 @@ mod tests {
     #[test]
     fn adjacents_cardinal_sane() {
         let pos = Position2D { x: 2, y: 6 };
-        let results = pos.adjacents_cardinal();
-        assert_eq!(results[0], Position2D { x: 1, y: 6 });
-        assert_eq!(results[1], Position2D { x: 3, y: 6 });
-        assert_eq!(results[2], Position2D { x: 2, y: 5 });
-        assert_eq!(results[2], Position2D { x: 2, y: 7 });
+        let results = Position2D::adjacents::<Position2D<i32>, CardinalAdjacencyGenerator<Position2D<i32>>>(pos);
+        assert_eq!(results[0], Position2D { x: 1i32, y: 6i32 });
+        assert_eq!(results[1], Position2D { x: 3i32, y: 6i32 });
+        assert_eq!(results[2], Position2D { x: 2i32, y: 5i32 });
+        assert_eq!(results[3], Position2D { x: 2i32, y: 7i32 });
     }
 
     #[test]
