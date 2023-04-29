@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
@@ -22,6 +23,7 @@ pub struct GeneratorRuleset<A: DistributionKey> {
     layout_rules: MapColoringAssigner<A>,
     coloring_rules: HashMap<A, MapColor>,
     pub(crate) map_size: u32,
+    pub(crate) adjacency: Option<String>,
     comments: Option<String>
 }
 
@@ -29,13 +31,15 @@ impl<A: DistributionKey> GeneratorRuleset<A> {
     pub fn new(
         layout: MapColoringAssigner<A>,
         coloring: HashMap<A, MapColor>,
-        map_size: Option<u32>
+        map_size: Option<u32>,
+        adjacency: Option<String>,
     ) -> Self {
 
         Self {
             layout_rules: layout,
             coloring_rules: coloring,
             map_size: map_size.unwrap_or(60u32),
+            adjacency,
             comments: None
         }
     }
@@ -54,11 +58,12 @@ impl<A: DistributionKey> Into<HashMap<A, MapColor>> for GeneratorRuleset<A> {
     }
 }
 
-impl<'a, 'b> From<(&'a str, &'b str, Option<u32>)> for GeneratorRuleset<i8> {
-    fn from(value: (&'a str, &'b str, Option<u32>)) -> Self {
+impl<'a, 'b, 'c, BS: Borrow<&'c str>> From<(&'a str, &'b str, Option<u32>, Option<BS>)> for GeneratorRuleset<i8> {
+    fn from(value: (&'a str, &'b str, Option<u32>, Option<BS>)) -> Self {
         let colormap_path = value.0;
         let ruleset_path = value.1;
         let map_size = value.2;
+        let adjacency = value.3.map(|a| a.borrow().trim().to_lowercase());
 
         let raw_colormap: HashMap<i8, ril::Rgb> = mapgen_presets::read_colormap(colormap_path);
         let colormap = raw_colormap.iter().map(
@@ -70,7 +75,13 @@ impl<'a, 'b> From<(&'a str, &'b str, Option<u32>)> for GeneratorRuleset<i8> {
 
         let ruleset = mapgen_presets::read_rules(ruleset_path);
 
-        Self::new(ruleset, colormap, map_size)
+        Self::new(ruleset, colormap, map_size, adjacency)
+    }
+}
+
+impl<'a, 'b> From<(&'a str, &'b str, Option<u32>)> for GeneratorRuleset<i8> {
+    fn from(value: (&'a str, &'b str, Option<u32>)) -> Self {
+        Self::from((value.0, value.1, value.2, None::<&str>))
     }
 }
 
@@ -113,14 +124,14 @@ impl GeneratorRuleset<i8> {
     }
 }
 
-impl GeneratorRuleset<i8> {
-    pub fn generate_with_visualizer<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, i8, MP>>(&self, visualiser: V)
+impl<DK: DistributionKey> GeneratorRuleset<DK> {
+    pub fn generate_with_visualizer<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, visualiser: V)
         where MP::Key: PositionKey + NumCast
     {
         let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
         let map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
         let assignment_rules = self.layout_rules.to_owned();
-        let colormap: HashMap<i8, ril::Rgb> = self.coloring_rules.iter().map(
+        let colormap: HashMap<DK, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
                 k.to_owned(),
                 v.to_owned().into()
@@ -156,6 +167,6 @@ impl GeneratorRuleset<i8> {
         where MP::Key: PositionKey + NumCast + Into<u32>
     {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<i8>>(visualizer)
+        self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(visualizer)
     }
 }
