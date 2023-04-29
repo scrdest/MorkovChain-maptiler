@@ -109,6 +109,7 @@
       ]
     }
   },
-  "map_size": 1000,
+  "map_size": 128,
+  "adjacency": "cardinal",
   "comments": null
 }

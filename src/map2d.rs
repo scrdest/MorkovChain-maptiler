@@ -1,7 +1,7 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use arrayvec::ArrayVec;
+use smallvec::SmallVec;
 use num::{Bounded, Zero};
 use serde::{Deserialize, Serialize};
 use crate::adjacency::{AdjacencyGenerator};
@@ -91,9 +91,9 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
 }
 
 impl<K: DistributionKey, MP: MapPosition<2>, RMP: Borrow<MP> + From<MP>, AG: AdjacencyGenerator<2, Input=RMP>> Map2D<AG, K, MP> {
-    // NOTE: we're using a magic maxcap for ArrayVecs, because generics are a bane of my existence
+    // NOTE: we're using a magic maxcap, because generics are a bane of my existence
 
-    pub fn adjacent_from_pos(&self, pos: RMP) -> ArrayVec<ThreadsafeNodeRef<AG, K, MP>, 16> {
+    pub fn adjacent_from_pos(&self, pos: RMP) -> SmallVec<[ThreadsafeNodeRef<AG, K, MP>; 8]> {
         let adjacents: AG::Output = MapPosition::adjacents::<RMP, AG>(pos);
 
         let result = adjacents
@@ -110,7 +110,7 @@ impl<K: DistributionKey, MP: MapPosition<2>, RMP: Borrow<MP> + From<MP>, AG: Adj
         result.collect()
     }
 
-    pub fn adjacent<NR: Borrow<Map2DNode<AG, K, MP>>>(&self, node: NR) -> ArrayVec<ThreadsafeNodeRef<AG, K, MP>, 16> {
+    pub fn adjacent<NR: Borrow<Map2DNode<AG, K, MP>>>(&self, node: NR) -> SmallVec<[ThreadsafeNodeRef<AG, K, MP>; 8]> {
         let pos = node.borrow().position;
         let borrowed_pos: RMP = pos.into();
 
