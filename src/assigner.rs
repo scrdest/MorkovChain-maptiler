@@ -136,14 +136,18 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
 
             neighbors.iter().for_each(|neighbor| {
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
-                let mut neighbor_writer = neighbor.write().unwrap();
-
-                let maybe_neighbor_rule_probas = match &neighbor_writer.state {
-                    MapNodeState::Undecided(probas) => Some(probas),
-                    MapNodeState::Finalized(_) => None
-                };
+                let maybe_neighbor_rule_probas;
+                {
+                    // sub-scope to free up the reader after use
+                    let neighbor_reader = neighbor.read().unwrap();
+                    maybe_neighbor_rule_probas = match &neighbor_reader.state {
+                        MapNodeState::Undecided(probas) => Some(probas.to_owned()),
+                        MapNodeState::Finalized(_) => None
+                    };
+                }
 
                 if maybe_neighbor_rule_probas.is_some() {
+                    let mut neighbor_writer = neighbor.write().unwrap();
                     let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
                     let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
@@ -231,14 +235,18 @@ where
             par_indices.into_par_iter().for_each(|idx| {
                 let neighbor = neighbors.get(idx).unwrap();
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
-                let mut neighbor_writer = neighbor.write().unwrap();
-
-                let maybe_neighbor_rule_probas = match &neighbor_writer.state {
-                    MapNodeState::Undecided(probas) => Some(probas),
-                    MapNodeState::Finalized(_) => None
-                };
+                let maybe_neighbor_rule_probas;
+                {
+                    // sub-scope to free up the reader after use
+                    let neighbor_reader = neighbor.read().unwrap();
+                    maybe_neighbor_rule_probas = match &neighbor_reader.state {
+                        MapNodeState::Undecided(probas) => Some(probas.to_owned()),
+                        MapNodeState::Finalized(_) => None
+                    };
+                }
 
                 if maybe_neighbor_rule_probas.is_some() {
+                    let mut neighbor_writer = neighbor.write().unwrap();
                     let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
                     let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
