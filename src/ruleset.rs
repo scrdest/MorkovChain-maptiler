@@ -6,7 +6,9 @@ use std::io::Error;
 use std::path::Path;
 use std::usize;
 use num::{Bounded, NumCast, Zero};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use crate::adjacency::AdjacencyGenerator;
 
 use crate::assigner::{MapColoringAssigner, MapColoringJob};
@@ -138,13 +140,16 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
             )
         ).collect();
 
-        let mut tile_positions = Vec::with_capacity(map_usize * map_usize);
+        let mut tile_positions: SmallVec<[(<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key); 256]> = smallvec::SmallVec::with_capacity(map_usize * map_usize);
         for pos_x in num::range(MP::Key::zero(), map_size) {
             for pos_y in num::range(MP::Key::zero(), map_size) {
                 tile_positions.push((pos_x, pos_y))
             }
         }
-        let test_tiles = tile_positions.iter().map(
+
+        let tile_iter: std::slice::Iter<'_, (<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key)> = tile_positions.iter();
+
+        let test_tiles = tile_iter.map(
             |(x, y)| Map2DNode::with_possibilities(
                 MP::from_dims([
                     <<MP as MapPosition<2>>::Key as NumCast>::from(x.to_owned()).unwrap(),
@@ -168,5 +173,59 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
     {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
         self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(visualizer)
+    }
+}
+
+
+impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
+    pub fn par_generate_with_visualizer<AG, MP, V>(&self, visualiser: V) where
+        AG: AdjacencyGenerator<2, Input = MP> + Send + Sync,
+        MP: MapPosition<2> + Send + Sync,
+        MP::Key: PositionKey + NumCast + Send + Sync,
+        V: MapVisualizer<AG, DK, MP>,
+    {
+        let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
+        let map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
+        let assignment_rules = self.layout_rules.to_owned();
+        let colormap: HashMap<DK, ril::Rgb> = self.coloring_rules.par_iter().map(
+            |(k, v)| (
+                k.to_owned(),
+                v.to_owned().into()
+            )
+        ).collect();
+
+        let mut tile_positions: SmallVec<[(<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key); 256]> = smallvec::SmallVec::with_capacity(map_usize * map_usize);
+        for pos_x in num::range(MP::Key::zero(), map_size) {
+            for pos_y in num::range(MP::Key::zero(), map_size) {
+                tile_positions.push((pos_x, pos_y))
+            }
+        }
+
+        let test_tiles = tile_positions.iter().map(
+            |(x, y)| Map2DNode::with_possibilities(
+                MP::from_dims([
+                    <<MP as MapPosition<2>>::Key as NumCast>::from(x.to_owned()).unwrap(),
+                    <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
+                ]),
+                MultinomialDistribution::uniform_over(
+                    colormap.keys().into_iter().map(|k| k.to_owned())
+                )
+            )
+        );
+        let testmap = Map2D::from_tiles(test_tiles);
+
+        let mut job = MapColoringJob::new_with_queue(assignment_rules, testmap);
+        let map_result = job.queue_and_assign();
+        let map_reader = &*map_result.read().unwrap();
+        visualiser.visualise(map_reader);
+    }
+
+    pub fn par_generate<AG, MP>(&self) where
+        AG: AdjacencyGenerator<2, Input = MP> + Send + Sync,
+        MP: MapPosition<2> + Send + Sync,
+        MP::Key: PositionKey + NumCast + Into<u32> + Send + Sync
+    {
+        let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
+        self.par_generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(visualizer)
     }
 }

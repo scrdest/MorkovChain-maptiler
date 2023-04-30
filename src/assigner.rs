@@ -3,9 +3,12 @@ use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, RwLock};
+
+use serde::{Deserialize, Serialize};
+use rayon::prelude::*;
+
 use crate::map2d::Map2D;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
-use serde::{Deserialize, Serialize};
 use crate::adjacency::AdjacencyGenerator;
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
@@ -68,7 +71,7 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         for tile_lock in map_reader.undecided_tiles.values() {
             let tile_reader = tile_lock.read().unwrap();
             let is_assigned = tile_reader.state.is_assigned();
-            if is_assigned {continue};
+            if is_assigned { continue };
 
             let tile = tile_reader.deref().to_owned();
             let ord_tile = MapNodeEntropyOrdering::from(tile);
@@ -131,29 +134,35 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
             let neighbors = map_operator.adjacent(node.deref());
             drop(node);
 
-            for neighbor in neighbors {
+            neighbors.iter().for_each(|neighbor| {
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
                 let mut neighbor_writer = neighbor.write().unwrap();
 
-                let neighbor_rule_probas = match &neighbor_writer.state {
-                    MapNodeState::Undecided(probas) => probas,
-                    MapNodeState::Finalized(_) => continue
+                let maybe_neighbor_rule_probas = match &neighbor_writer.state {
+                    MapNodeState::Undecided(probas) => Some(probas),
+                    MapNodeState::Finalized(_) => None
                 };
 
-                let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
-                neighbor_writer.state = MapNodeState::from(new_possibilities);
-                //println!("Assigned new probas for neighbor {:?}!", neighbor);
+                if maybe_neighbor_rule_probas.is_some() {
+                    let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
+                    let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
+                    neighbor_writer.state = MapNodeState::from(new_possibilities);
+                    //println!("Assigned new probas for neighbor {:?}!", neighbor);
 
-                let neigh_pos = neighbor_writer.position;
-                drop(neighbor_writer);
+                    let neigh_pos = neighbor_writer.position;
+                    drop(neighbor_writer);
 
-                let neigh_queued = enqueued.get(&neigh_pos).is_some();
+                    let neigh_queued = enqueued.get(&neigh_pos).is_some();
 
-                if !neigh_queued {
-                    let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
-                    queue_writer.push(wrapped_neighbor);
+                    if !neigh_queued {
+                        let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
+                        queue_writer.push(wrapped_neighbor);
+                    }
+
                 }
-            }
+
+                // no real return value
+            })
         }
 
         map
@@ -162,6 +171,101 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
     pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>> {
         self.build_queue();
         self.assign_map()
+    }
+}
+
+
+impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapColoringJob<AG, K, MP>
+where
+    AG: Send + Sync,
+    K: Send + Sync,
+    MP: Send + Sync,
+    <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
+{
+    pub fn par_assign_map(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>>
+    {
+        let mut queue_writer = self.queue.write().unwrap();
+        let map = &self.map;
+        let mut map_operator = map.write().unwrap();
+
+        let mut enqueued = HashSet::with_capacity(map_operator.undecided_tiles.len());
+        match queue_writer.peek() {
+            Some(enqueued_node) => enqueued.insert(enqueued_node.node.position()),
+            None => false
+        };
+
+        while !queue_writer.is_empty() {
+            let assignee = &queue_writer.pop().unwrap().node;
+            let raw_node = match assignee {
+                MapNodeWrapper::Raw(node) => Arc::new(RwLock::new(node.to_owned())),
+                MapNodeWrapper::Arc(node) => node.to_owned(),
+            };
+            let mut node = raw_node.write().unwrap();
+            let node_state = &node.state.to_owned();
+            let curr_pos = node.position;
+
+            enqueued.remove(&curr_pos);
+            map_operator.undecided_tiles.remove(&curr_pos);
+
+            let possibilities = match node_state {
+                MapNodeState::Undecided(probas) => probas,
+                MapNodeState::Finalized(_) => {
+                    continue
+                }
+            };
+
+            let new_assignment = possibilities.sample_with_default_rng();
+            // println!("Assigning {:?} => {:?}", node.position, new_assignment);
+
+            let self_rule_probas = match self.rules.transition_rules.get(&new_assignment) {
+                Some(probas) => probas,
+                None => continue
+            };
+
+            node.state = MapNodeState::from(new_assignment);
+
+            let neighbors = map_operator.adjacent(node.deref());
+            let par_indices = 0..neighbors.len();
+            drop(node);
+
+            par_indices.into_par_iter().for_each(|idx| {
+                let neighbor = neighbors.get(idx).unwrap();
+                // println!("Acquiring lock for neighbor {:?}...", neighbor);
+                let mut neighbor_writer = neighbor.write().unwrap();
+
+                let maybe_neighbor_rule_probas = match &neighbor_writer.state {
+                    MapNodeState::Undecided(probas) => Some(probas),
+                    MapNodeState::Finalized(_) => None
+                };
+
+                if maybe_neighbor_rule_probas.is_some() {
+                    let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
+                    let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
+                    neighbor_writer.state = MapNodeState::from(new_possibilities);
+                    //println!("Assigned new probas for neighbor {:?}!", neighbor);
+
+                    let neigh_pos = neighbor_writer.position;
+                    drop(neighbor_writer);
+
+                    let neigh_queued = enqueued.get(&neigh_pos).is_some();
+
+                    if !neigh_queued {
+                        let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
+                        let mut sub_queue_writer = self.queue.write().unwrap();
+                        sub_queue_writer.push(wrapped_neighbor);
+                    }
+                }
+
+                // no real return value
+            });
+        };
+
+        map
+    }
+
+    pub fn par_queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>> {
+        self.build_queue();
+        self.par_assign_map()
     }
 }
 
