@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use num::{Bounded, Zero};
 use serde::{Deserialize, Serialize};
 use crate::adjacency::{AdjacencyGenerator};
-use crate::sampler::DistributionKey;
+use crate::sampler::{DistributionKey, MultinomialDistribution};
 use crate::map2dnode::{Map2DNode, MapNodeState, ThreadsafeNodeRef};
 use crate::position::{MapPosition};
 
@@ -70,8 +70,8 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
         }
     }
 
-    pub fn get(&self, key: MP) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
-        self.position_index.get(&key)
+    pub fn get<BMP: Borrow<MP>>(&self, key: BMP) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
+        self.position_index.get(key.borrow())
     }
 
     pub fn finalize_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<AG, K, MP>, assignment: K) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
@@ -87,6 +87,30 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
             },
             Err(_) => None
         }
+    }
+
+    pub fn unassign_tile<'n>(&'n mut self, tile: &'n ThreadsafeNodeRef<AG, K, MP>, distribution: &'n MultinomialDistribution<K>) -> Option<&ThreadsafeNodeRef<AG, K, MP>> {
+        let tile_writer = tile.write();
+
+        match tile_writer {
+            Ok(mut writeable) => {
+                writeable.state = MapNodeState::Undecided(distribution.to_owned());
+                let inserted = self.undecided_tiles.insert(writeable.position, tile.to_owned());
+                match inserted {
+                    Some(_) => Some(tile),
+                    None => panic!("Failed to insert a tile into the undecided tiles map!")
+                }
+            },
+            Err(_) => panic!("Failed to obtain a write lock on tile to un-assign!")
+        }
+    }
+
+    pub fn unassign_tiles<'n, I: IntoIterator<Item=&'n ThreadsafeNodeRef<AG, K, MP>>>(&'n mut self, tiles: I, distribution: MultinomialDistribution<K>) -> Option<()> {
+        let tile_iter = tiles.into_iter();
+        let results = tile_iter.for_each(|tile| {
+            self.unassign_tile(tile, &distribution);
+        });
+        Some(results)
     }
 }
 

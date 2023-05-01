@@ -34,8 +34,9 @@ impl<R: Borrow<ril::Rgb>> From<R> for MapColor {
 
 pub trait MapVisualizer<AG: AdjacencyGenerator<2>, N: DistributionKey, MP: MapPosition<2>> {
     type Output;
+    type Args;
 
-    fn visualise(&self, map: &Map2D<AG, N, MP>) -> Option<Self::Output>;
+    fn visualise(&self, map: &Map2D<AG, N, MP>, args: Option<Self::Args>) -> Option<Self::Output>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,8 +74,9 @@ impl<AG: AdjacencyGenerator<2>, N: DistributionKey, MP: MapPosition<2>> MapVisua
 where MP::Key: PositionKey + NumCast + Into<u32>
 {
     type Output = ();
+    type Args = String;
 
-    fn visualise(&self, map: &Map2D<AG, N, MP>) -> Option<Self::Output> {
+    fn visualise(&self, map: &Map2D<AG, N, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
         const MAP_SCALE_FACTOR: u32 = 1;
 
         let min_pos = map.min_pos.get_dims();
@@ -144,7 +146,8 @@ where MP::Key: PositionKey + NumCast + Into<u32>
             repr.draw(&mut image);
         }
 
-        let result = image.save_inferred("map.png");
+        let fname = output.unwrap_or(Self::Args::from("map.png"));
+        let result = image.save_inferred(fname);
         match result {
             Ok(_) => Some(()),
             Err(err) => {

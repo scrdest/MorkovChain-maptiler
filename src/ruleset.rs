@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Error;
+use std::ops::Div;
 use std::path::Path;
 use std::usize;
-use num::{Bounded, NumCast, Zero};
+use itertools::Itertools;
+use num::{Bounded, NumCast, range_inclusive, Zero};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -13,7 +15,7 @@ use crate::adjacency::AdjacencyGenerator;
 
 use crate::assigner::{MapColoringAssigner, MapColoringJob};
 use crate::map2d::Map2D;
-use crate::map2dnode::Map2DNode;
+use crate::map2dnode::{Map2DNode, MapNodeState};
 use crate::mapgen_presets;
 use crate::position::{MapPosition, PositionKey};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
@@ -222,7 +224,7 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
         let map_result = job.queue_and_assign();
         let map_reader = map_result.read().unwrap();
 
-        visualiser.visualise(&map_reader);
+        visualiser.visualise(&map_reader, None);
     }
 
     /// Creates a filled (i.e. 'collapsed') map,
@@ -370,7 +372,136 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
         let map_result = job.queue_and_assign();
         let map_reader = map_result.read().unwrap();
 
-        visualiser.visualise(&map_reader);
+        visualiser.visualise(&map_reader, None);
+    }
+
+    /// Showcase of Modifying In Blocks approach - generates a map, then edits
+    /// the top-left quadrant by restting it to an unassigned state and filling it in again.
+    /// The approach here is consistent (i.e. doesn't violate constraints), but may exhibit
+    /// directional artifacts on the quadrant edge (usually, unnaturally straight lines).
+    pub fn generate_with_visualizer_par_mib<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, init_map: Option<Map2D<AG, DK, MP>>, visualiser: V) where
+        AG: AdjacencyGenerator<2, Input = MP> + Send + Sync,
+        MP: MapPosition<2> + Send + Sync,
+        MP::Key: PositionKey + NumCast + Into<u32> + Send + Sync,
+        V: MapVisualizer<AG, DK, MP>,
+        V::Args: From<&'static str>
+    {
+        let assignment_rules = self.layout_rules.to_owned();
+        let gen_map = init_map.unwrap_or_else(
+            || self.build_unassigned_map_par::<AG, MP, V>()
+        );
+
+        let mut job = MapColoringJob::new_with_queue(assignment_rules, gen_map.to_owned());
+        let map_result = job.queue_and_assign();
+        let map_reader = map_result.read().unwrap();
+
+        visualiser.visualise(&map_reader, None);
+
+        let min_pos = map_reader.min_pos.get_dims();
+        let max_pos = map_reader.max_pos.get_dims();
+
+        let min_pos_dimval = min_pos.first().unwrap().to_owned();
+        let max_pos_dimval = max_pos
+            .first().unwrap()
+            .to_owned()
+            .div(
+                num::NumCast::from(2).unwrap()
+            );
+
+        let tilerange = range_inclusive(
+            min_pos_dimval,
+            max_pos_dimval
+        );
+        let fuserange = tilerange.to_owned().cartesian_product(tilerange);
+
+        let targ_tiles = fuserange.filter_map(
+            |(x, y)| {
+                let dims = [x, y];
+                let map_pos = MP::from_dims(dims);
+                let map_tile = map_reader.get(&map_pos);
+                map_tile
+            }
+        );
+
+        let mut newmap = gen_map;
+        let new_assignment_rules = self.layout_rules.to_owned();
+        let trans_rules = new_assignment_rules.transition_rules.to_owned();
+        let map_keys = trans_rules.to_owned().into_keys();
+
+        newmap.unassign_tiles(
+            targ_tiles,
+            MultinomialDistribution::uniform_over(
+                map_keys
+            )
+        );
+
+        let edge_tiles_x = range_inclusive(min_pos_dimval, max_pos_dimval).filter_map(
+            |x| {
+                let dims = [x, max_pos_dimval];
+                let map_pos = MP::from_dims(dims);
+                let map_tile = map_reader.get(&map_pos);
+                map_tile
+            }
+        );
+
+        let unity: MP::Key = num::NumCast::from(1).unwrap();
+
+        edge_tiles_x.for_each(
+            |tile| {
+                let mut tile_writer = tile.write().unwrap();
+                let pos = tile_writer.position.get_dims();
+                let adj_pos = MP::from_dims([pos[0], pos[1] + unity]);
+                let assigned_neighbor = newmap.get(&adj_pos).unwrap();
+                let neigh_reader = assigned_neighbor.read().unwrap();
+                let neigh_state = &neigh_reader.state;
+                let neigh_dist = match neigh_state {
+                    MapNodeState::Undecided(distribution) => distribution.to_owned(),
+                    MapNodeState::Finalized(assignment) => MultinomialDistribution::uniform_over(Some(assignment.to_owned()))
+                };
+                let my_dist = match &tile_writer.state {
+                    MapNodeState::Undecided(distribution) => distribution,
+                    MapNodeState::Finalized(_) => panic!("Tile should have been unassigned on X-edge scan!")
+                };
+                let updated_dist = neigh_dist.joint_probability(my_dist);
+                tile_writer.state = MapNodeState::Undecided(updated_dist)
+            }
+        );
+
+        let edge_tiles_y = range_inclusive(min_pos_dimval, max_pos_dimval).filter_map(
+            |y| {
+                let dims = [max_pos_dimval, y];
+                let map_pos = MP::from_dims(dims);
+                let map_tile = map_reader.get(&map_pos);
+                map_tile
+            }
+        );
+
+        edge_tiles_y.for_each(
+            |tile| {
+                let mut tile_writer = tile.write().unwrap();
+                let pos = tile_writer.position.get_dims();
+                let adj_pos = MP::from_dims([pos[0] + unity, pos[1]]);
+                let assigned_neighbor = newmap.get(&adj_pos).unwrap();
+                let neigh_reader = assigned_neighbor.read().unwrap();
+                let neigh_state = &neigh_reader.state;
+                let neigh_dist = match neigh_state {
+                    MapNodeState::Undecided(distribution) => distribution.to_owned(),
+                    MapNodeState::Finalized(assignment) => MultinomialDistribution::uniform_over(Some(assignment.to_owned()))
+                };
+                let my_dist = match &tile_writer.state {
+                    MapNodeState::Undecided(distribution) => distribution,
+                    MapNodeState::Finalized(_) => panic!("Tile should have been unassigned on Y-edge scan!")
+                };
+                let updated_dist = neigh_dist.joint_probability(my_dist);
+                tile_writer.state = MapNodeState::Undecided(updated_dist)
+            }
+        );
+
+        let mut nujob = MapColoringJob::new_with_queue(new_assignment_rules, newmap);
+        let newmap_result = nujob.queue_and_assign();
+        let newmap_reader = newmap_result.read().unwrap();
+
+        visualiser.visualise(&newmap_reader, Some("editmap.png".into()));
     }
 
     /// Creates a filled (i.e. 'collapsed') map,
@@ -391,7 +522,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
         MP::Key: PositionKey + NumCast + Into<u32> + Send + Sync
     {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer_par::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
+        self.generate_with_visualizer_par_mib::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
     }
 
     /// Creates a filled (i.e. 'collapsed') map from scratch,

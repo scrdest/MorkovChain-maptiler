@@ -25,7 +25,7 @@ enum QueueState {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MapColoringAssigner<K: DistributionKey> {
-    transition_rules: HashMap<K, MultinomialDistribution<K>>,
+    pub(crate) transition_rules: HashMap<K, MultinomialDistribution<K>>,
     comments: Option<String>
 }
 
