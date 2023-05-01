@@ -127,12 +127,22 @@ impl GeneratorRuleset<i8> {
 }
 
 impl<DK: DistributionKey> GeneratorRuleset<DK> {
-    pub fn generate_with_visualizer<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, visualiser: V)
+    /// Generates an empty (i.e. 'uncollapsed') map.
+    /// This can be passed to a generate/infill function to collapse the map to a generated state.
+    ///
+    ///  **Arguments**:
+    /// * `map_size` - optional u32, size of the map to generate (currently only square maps supported,
+    /// so this corresponds to both X & Y axes. If None, falls back to the Ruleset value.
+    ///
+    ///  **Returns**: a new Map2D.
+    ///
+    fn build_unassigned_map_with_size<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, map_size: Option<u32>) -> Map2D<AG, DK, MP>
         where MP::Key: PositionKey + NumCast
     {
-        let map_usize = <usize as NumCast>::from(self.map_size).unwrap();
-        let map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(self.map_size).unwrap_or(MP::Key::max_value());
-        let assignment_rules = self.layout_rules.to_owned();
+        let raw_map_size = map_size.unwrap_or(self.map_size);
+        let map_usize = <usize as NumCast>::from(raw_map_size).unwrap();
+        let true_map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(raw_map_size).unwrap_or(MP::Key::max_value());
+
         let colormap: HashMap<DK, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
                 k.to_owned(),
@@ -141,8 +151,8 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
         ).collect();
 
         let mut tile_positions: SmallVec<[(<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key); 256]> = smallvec::SmallVec::with_capacity(map_usize * map_usize);
-        for pos_x in num::range(MP::Key::zero(), map_size) {
-            for pos_y in num::range(MP::Key::zero(), map_size) {
+        for pos_x in num::range(MP::Key::zero(), true_map_size) {
+            for pos_y in num::range(MP::Key::zero(), true_map_size) {
                 tile_positions.push((pos_x, pos_y))
             }
         }
@@ -161,18 +171,80 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
             )
         );
         let testmap = Map2D::from_tiles(test_tiles);
-
-        let mut job = MapColoringJob::new_with_queue(assignment_rules, testmap);
-        let map_result = job.queue_and_assign();
-        let map_reader = &*map_result.read().unwrap();
-        visualiser.visualise(map_reader);
+        testmap
     }
 
-    pub fn generate<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>>(&self)
+    /// Generates an empty (i.e. 'uncollapsed') map.
+    /// This can be passed to a generate/infill function to collapse the map to a generated state.
+    ///
+    /// Takes no arguments, effectively a sugar for `self.build_unassigned_map_with_size(None)`
+    ///
+    /// **Returns**: a new Map2D.
+    ///
+     fn build_unassigned_map<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self) -> Map2D<AG, DK, MP>
+        where MP::Key: PositionKey + NumCast
+    {
+        self.build_unassigned_map_with_size::<AG, MP, V>(None)
+    }
+
+    /// Creates a filled (i.e. 'collapsed') map,
+    /// either from a partially un-collapsed map or entirely from scratch,
+    /// and renders it using a provided MapVisualizer.
+    ///
+    ///  **Arguments**:
+    /// * init_map - optional; a pre-initialized map to fill out.
+    /// If None, will create a new map using the provided Ruleset's rules
+    /// * visualizer - MapVisualizer interface to use to render the generated map.
+    ///
+    /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
+    ///
+    pub fn generate_with_visualizer<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, init_map: Option<Map2D<AG, DK, MP>>, visualiser: V)
+        where MP::Key: PositionKey + NumCast
+    {
+        let assignment_rules = self.layout_rules.to_owned();
+        let gen_map = init_map.unwrap_or_else(
+            || self.build_unassigned_map::<AG, MP, V>()
+        );
+
+        let mut job = MapColoringJob::new_with_queue(assignment_rules, gen_map);
+        let map_result = job.queue_and_assign();
+        let map_reader = map_result.read().unwrap();
+
+        visualiser.visualise(&map_reader);
+    }
+
+    /// Creates a filled (i.e. 'collapsed') map,
+    /// either from a partially un-collapsed map or entirely from scratch,
+    /// and renders it using the *default* MapVisualizer.
+    ///
+    /// Effectively sugar over `self.generate_with_visualizer(init_map, <default visualizer>)`
+    ///
+    ///  **Arguments**:
+    /// * init_map - optional; a pre-initialized map to fill out.
+    /// If None, will create a new map using the provided Ruleset's rules
+    ///
+    /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
+    ///
+    pub fn generate_map<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>>(&self, init_map: Option<Map2D<AG, DK, MP>>)
         where MP::Key: PositionKey + NumCast + Into<u32>
     {
         let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(visualizer)
+        self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
+    }
+
+    /// Creates a filled (i.e. 'collapsed') map from scratch,
+    /// and renders it using the *default* MapVisualizer.
+    ///
+    /// Effectively sugar over `self.generate_map(None, <default visualizer>)`
+    ///
+    /// **Arguments** - none
+    ///
+    /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
+    ///
+    pub fn generate<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>>(&self)
+        where MP::Key: PositionKey + NumCast + Into<u32>
+    {
+        self.generate_map::<AG, MP>(None)
     }
 }
 
