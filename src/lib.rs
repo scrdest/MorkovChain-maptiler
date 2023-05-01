@@ -19,6 +19,8 @@ const COLORMAP_FILENAME: &str = "coloring_rules.json";
 const RULESET_FILENAME: &str = "layout_rules.json";
 const COMBINED_RULESET_FILENAME: &str = "rules.json";
 
+
+#[allow(dead_code)]
 fn generate(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Option<u32>) {
     let rules: GeneratorRuleset<i8> = GeneratorRuleset::from((
         colormap_path.unwrap_or(COLORMAP_FILENAME),
@@ -27,9 +29,23 @@ fn generate(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Opti
     ));
     rules.save(COMBINED_RULESET_FILENAME);
     match rules.map_size {
-        0..=254 => rules.par_generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-        255..=65534 => rules.par_generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-        _ => rules.par_generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+        0..=254 => rules.generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+        255..=65534 => rules.generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+        _ => rules.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+    };
+}
+
+fn generate_par(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Option<u32>) {
+    let rules: GeneratorRuleset<i8> = GeneratorRuleset::from((
+        colormap_path.unwrap_or(COLORMAP_FILENAME),
+        rule_path.unwrap_or(RULESET_FILENAME),
+        map_size
+    ));
+    rules.save(COMBINED_RULESET_FILENAME);
+    match rules.map_size {
+        0..=254 => rules.generate_par::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+        255..=65534 => rules.generate_par::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+        _ => rules.generate_par::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
     };
 }
 
@@ -51,7 +67,6 @@ fn generate_from_ruleset<T: DistributionKey>(ruleset: &GeneratorRuleset<T>) {
             _ => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
         },
     }
-
 }
 
 fn generate_from_ruleset_par<T: DistributionKey>(ruleset: &GeneratorRuleset<T>) where
@@ -63,14 +78,14 @@ fn generate_from_ruleset_par<T: DistributionKey>(ruleset: &GeneratorRuleset<T>) 
 
     match normalized_adjacency.as_str() {
         "cardinal" => match ruleset.map_size {
-            0..=254 => ruleset.par_generate::<CardinalAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-            255..=65534 => ruleset.par_generate::<CardinalAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-            _ => ruleset.par_generate::<CardinalAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+            0..=254 => ruleset.generate_par::<CardinalAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+            255..=65534 => ruleset.generate_par::<CardinalAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+            _ => ruleset.generate_par::<CardinalAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
         },
         "octile" | _ => match ruleset.map_size {
-            0..=254 => ruleset.par_generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-            255..=65534 => ruleset.par_generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-            _ => ruleset.par_generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+            0..=254 => ruleset.generate_par::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
+            255..=65534 => ruleset.generate_par::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
+            _ => ruleset.generate_par::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
         },
     }
 }
@@ -83,7 +98,7 @@ pub fn generate_from_file(ruleset_file: Option<&str>) {
         Ok(ruleset) => generate_from_ruleset_par(&ruleset),
         Err(e) => {
             eprintln!("{}", e);
-            generate(None, None, None)
+            generate_par(None, None, None)
         }
     };
 }
