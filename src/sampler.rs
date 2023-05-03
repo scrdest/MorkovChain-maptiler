@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::fmt::Debug;
@@ -110,8 +111,8 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
         ).sum()
     }
 
-    pub fn joint_probability_weights(&self, other: &Self) -> HashMap<Arc<K>, f32> {
-        let normalized_other = other.normalized_weights();
+    pub fn joint_probability_weights<BMD: Borrow<Self>>(&self, other: BMD) -> HashMap<Arc<K>, f32> {
+        let normalized_other = other.borrow().normalized_weights();
         let my_weights = &self.weights;
 
         let mut union_keys = HashSet::with_capacity(my_weights.len() + normalized_other.len());
@@ -153,7 +154,7 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
     //     self.joint_probability_weights(other)
     // }
 
-    pub fn joint_probability(&self, other: &Self) -> MultinomialDistribution<K> {
+    pub fn joint_probability<BMD: Borrow<Self>>(&self, other: BMD) -> MultinomialDistribution<K> {
         MultinomialDistribution::from(self.joint_probability_weights(other))
     }
 }
