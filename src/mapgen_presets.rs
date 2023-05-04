@@ -214,14 +214,11 @@ pub fn save_rules(filepath: &str) -> MapColoringAssigner<i8> {
 
 pub fn read_rules(filepath: &str) -> MapColoringAssigner<i8> {
     let rule_file = File::open(filepath);
-    let raw_result = match rule_file {
+    match rule_file {
         Ok(rule_fh) => serde_json::from_reader(rule_fh).unwrap(),
         Err(err) => {
             eprintln!("{}", err);
             save_rules(filepath)
         }
-    };
-
-    let cast_result = raw_result;
-    cast_result
+    }
 }

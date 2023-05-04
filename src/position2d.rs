@@ -26,9 +26,9 @@ impl<P: PositionKey> From<(P, P)> for Position2D<P> {
     }
 }
 
-impl<P: PositionKey> Into<(P, P)> for Position2D<P> {
-    fn into(self) -> (P, P) {
-        (self.x, self.y)
+impl<P: PositionKey> From<Position2D<P>> for (P, P) {
+    fn from(value: Position2D<P>) -> (P, P) {
+        (value.x, value.y)
     }
 }
 

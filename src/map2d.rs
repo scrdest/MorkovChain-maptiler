@@ -35,8 +35,8 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
             let cast_tile: Map2DNode<AG, K, MP> = tile;
             let tile_pos = cast_tile.position.get_dims();
 
-            let tile_pos_x = tile_pos.get(0).unwrap().clone();
-            let tile_pos_y = tile_pos.get(1).unwrap().clone();
+            let tile_pos_x = tile_pos.get(0).unwrap().to_owned();
+            let tile_pos_y = tile_pos.get(1).unwrap().to_owned();
 
             let tile_arc = Arc::new(RwLock::new(cast_tile));
             let tile_arc_reader = tile_arc.read().unwrap();
@@ -60,12 +60,12 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
             position_index: position_hashmap,
             undecided_tiles: undecided_hashmap,
             min_pos:  MP::from_dims([
-                minx.unwrap_or(maxx.unwrap_or(MP::Key::zero())),
-                miny.unwrap_or(maxy.unwrap_or(MP::Key::zero()))
+                minx.unwrap_or(maxx.unwrap_or(MP::Key::zero())).to_owned(),
+                miny.unwrap_or(maxy.unwrap_or(MP::Key::zero())).to_owned()
             ]),
             max_pos: MP::from_dims([
-                maxx.unwrap_or(minx.unwrap_or(MP::Key::zero())),
-                maxy.unwrap_or(miny.unwrap_or(MP::Key::zero()))
+                maxx.unwrap_or(minx.unwrap_or(MP::Key::zero())).to_owned(),
+                maxy.unwrap_or(miny.unwrap_or(MP::Key::zero())).to_owned()
             ])
         }
     }
@@ -107,10 +107,10 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
 
     pub fn unassign_tiles<'n, I: IntoIterator<Item=&'n ThreadsafeNodeRef<AG, K, MP>>>(&'n mut self, tiles: I, distribution: MultinomialDistribution<K>) -> Option<()> {
         let tile_iter = tiles.into_iter();
-        let results = tile_iter.for_each(|tile| {
+        tile_iter.for_each(|tile| {
             self.unassign_tile(tile, &distribution);
         });
-        Some(results)
+        Some(())
     }
 }
 

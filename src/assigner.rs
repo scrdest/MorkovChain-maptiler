@@ -146,9 +146,8 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
                     };
                 }
 
-                if maybe_neighbor_rule_probas.is_some() {
+                if let Some(neighbor_rule_probas) = maybe_neighbor_rule_probas {
                     let mut neighbor_writer = neighbor.write().unwrap();
-                    let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
                     let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
                     //println!("Assigned new probas for neighbor {:?}!", neighbor);
@@ -245,9 +244,8 @@ where
                     };
                 }
 
-                if maybe_neighbor_rule_probas.is_some() {
+                if let Some(neighbor_rule_probas) = maybe_neighbor_rule_probas {
                     let mut neighbor_writer = neighbor.write().unwrap();
-                    let neighbor_rule_probas = maybe_neighbor_rule_probas.unwrap();
                     let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
                     //println!("Assigned new probas for neighbor {:?}!", neighbor);

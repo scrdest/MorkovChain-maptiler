@@ -82,8 +82,8 @@ where MP::Key: PositionKey + NumCast + Into<u32>
         let min_pos = map.min_pos.get_dims();
         let max_pos = map.max_pos.get_dims();
 
-        let xspan_raw = MP::Key::one() + max_pos[0].clone() - min_pos[0].clone();
-        let yspan_raw = MP::Key::one() + max_pos[1].clone() - min_pos[1].clone();
+        let xspan_raw = MP::Key::one() + max_pos[0] - min_pos[0];
+        let yspan_raw = MP::Key::one() + max_pos[1] - min_pos[1];
 
         // ASSUMPTION: NumCast will return None only for *smaller* datatypes
         // (64s should get converted with truncation, i32 by dropping the sign)
@@ -113,11 +113,11 @@ where MP::Key: PositionKey + NumCast + Into<u32>
             let tilepos = tilereader.position.get_dims();
 
             let tilepos_x_relative = (
-                tilepos[0].clone() - min_pos[0].clone()
+                tilepos[0] - min_pos[0]
             ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
 
             let tilepos_y_relative = (
-                tilepos[1].clone() - min_pos[1].clone()
+                tilepos[1] - min_pos[1]
             ) * <<MP as MapPosition<2>>::Key as NumCast>::from(MAP_SCALE_FACTOR).unwrap();
 
             if tilepos_x_relative > <<MP as MapPosition<2>>::Key as NumCast>::from(u32::MAX).unwrap_or(MP::Key::max_value()) {continue}

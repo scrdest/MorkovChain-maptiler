@@ -51,17 +51,18 @@ impl<A: DistributionKey> GeneratorRuleset<A> {
 
 }
 
-impl<A: DistributionKey> Into<MapColoringAssigner<A>> for GeneratorRuleset<A> {
-    fn into(self) -> MapColoringAssigner<A> {
-        self.layout_rules.to_owned()
+impl<A: DistributionKey> From<GeneratorRuleset<A>> for MapColoringAssigner<A> {
+    fn from(val: GeneratorRuleset<A>) -> MapColoringAssigner<A> {
+        val.layout_rules
     }
 }
 
-impl<A: DistributionKey> Into<HashMap<A, MapColor>> for GeneratorRuleset<A> {
-    fn into(self) -> HashMap<A, MapColor> {
-        self.coloring_rules.to_owned()
+impl<A: DistributionKey> From<GeneratorRuleset<A>> for HashMap<A, MapColor> {
+    fn from(val: GeneratorRuleset<A>) -> Self {
+        val.coloring_rules
     }
 }
+
 
 impl<'a, 'b, 'c, BS: Borrow<&'c str>> From<(&'a str, &'b str, Option<u32>, Option<BS>)> for GeneratorRuleset<i8> {
     fn from(value: (&'a str, &'b str, Option<u32>, Option<BS>)) -> Self {
@@ -102,7 +103,7 @@ impl<'a, 'b> From<(&'a str, &'b str)> for GeneratorRuleset<i8> {
     }
 }
 
-impl<'d, K: DistributionKey + Serialize> GeneratorRuleset<K> {
+impl<K: DistributionKey + Serialize> GeneratorRuleset<K> {
     pub fn save<P: AsRef<Path>>(&self, filepath: P) -> &Self {
         let savefile = File::create(filepath).unwrap();
         serde_json::to_writer_pretty(savefile, self).unwrap();
@@ -123,7 +124,7 @@ impl GeneratorRuleset<i8> {
             },
             Err(e) => {
                 eprintln!("Failed to open GeneratorRuleset savefile {:?}.", filepath);
-                Err(Error::from(e))
+                Err(e)
             }
         }
     }
@@ -160,12 +161,11 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
                     <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
                 ]),
                 MultinomialDistribution::uniform_over(
-                    colormap.keys().into_iter().map(|k| k.to_owned())
+                    colormap.keys().map(|k| k.to_owned())
                 )
             )
         );
-        let testmap = Map2D::from_tiles(test_tiles);
-        testmap
+        Map2D::from_tiles(test_tiles)
     }
 
     /// Generates an empty (i.e. 'un-collapsed') map.
@@ -299,12 +299,11 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
                     <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
                 ]),
                 MultinomialDistribution::uniform_over(
-                    colormap.keys().into_iter().map(|k| k.to_owned())
+                    colormap.keys().map(|k| k.to_owned())
                 )
             )
         ).collect();
-        let testmap = Map2D::from_tiles(test_tiles);
-        testmap
+        Map2D::from_tiles(test_tiles)
     }
 
     /// Generates an empty (i.e. 'un-collapsed') map.
@@ -402,14 +401,14 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             |(x, y)| {
                 let dims = [x, y];
                 let map_pos = MP::from_dims(dims);
-                let map_tile = src_map.get(&map_pos);
+                let map_tile = src_map.get(map_pos);
                 map_tile
             }
         );
 
         let new_assignment_rules = self.layout_rules.to_owned();
         let trans_rules = new_assignment_rules.transition_rules.to_owned();
-        let map_keys = trans_rules.to_owned().into_keys();
+        let map_keys = trans_rules.into_keys();
 
         newmap.unassign_tiles(
             targ_tiles,
@@ -424,7 +423,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             |x| {
                 let dims = [x, min_pos_dimval];
                 let map_pos = MP::from_dims(dims);
-                let map_tile = src_map.get(&map_pos);
+                let map_tile = src_map.get(map_pos);
                 map_tile
             }
         ).map(
@@ -439,7 +438,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             |x| {
                 let dims = [x, max_pos_dimval];
                 let map_pos = MP::from_dims(dims);
-                let map_tile = src_map.get(&map_pos);
+                let map_tile = src_map.get(map_pos);
                 map_tile
             }).map(|tile| {
                 let tile_reader = tile.read().unwrap();
@@ -453,7 +452,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             |y| {
                 let dims = [min_pos_dimval, y];
                 let map_pos = MP::from_dims(dims);
-                let map_tile = src_map.get(&map_pos);
+                let map_tile = src_map.get(map_pos);
                 map_tile
             }
         ).map(
@@ -468,7 +467,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             |y| {
                 let dims = [max_pos_dimval, y];
                 let map_pos = MP::from_dims(dims);
-                let map_tile = src_map.get(&map_pos);
+                let map_tile = src_map.get(map_pos);
                 map_tile
             }).map(|tile| {
                 let tile_reader = tile.read().unwrap();
@@ -482,9 +481,9 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             .chain(edge_tiles_y)
             .for_each(|(tile, adj_pos)| {
                 let mut tile_writer = tile.write().unwrap();
-                let raw_assigned_neighbor = src_map.get(&adj_pos);
-                if raw_assigned_neighbor.is_some() {
-                    let assigned_neighbor = raw_assigned_neighbor.unwrap();
+                let raw_assigned_neighbor = src_map.get(adj_pos);
+                
+                if let Some(assigned_neighbor) = raw_assigned_neighbor {
                     let neigh_reader = assigned_neighbor.read().unwrap();
                     let neigh_dist = match &neigh_reader.state {
                         MapNodeState::Undecided(distribution) => distribution.to_owned(),

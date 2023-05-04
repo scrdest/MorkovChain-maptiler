@@ -103,7 +103,7 @@ pub struct MapNodeEntropyOrdering<AG: AdjacencyGenerator<2>, K: DistributionKey,
 impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Map2DNode<AG, K, MP>> for MapNodeEntropyOrdering<AG, K, MP> {
     fn from(value: Map2DNode<AG, K, MP>) -> Self {
         Self {
-            node: MapNodeWrapper::Raw(value.clone())
+            node: MapNodeWrapper::Raw(value)
         }
     }
 }
@@ -111,7 +111,7 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Map
 impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Arc<RwLock<Map2DNode<AG, K, MP>>>> for MapNodeEntropyOrdering<AG, K, MP> {
     fn from(value: Arc<RwLock<Map2DNode<AG, K, MP>>>) -> Self {
         Self {
-            node: MapNodeWrapper::Arc(value.clone())
+            node: MapNodeWrapper::Arc(value)
         }
     }
 }

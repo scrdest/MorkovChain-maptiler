@@ -1,2 +1,6 @@
 /target
 /Cargo.lock
+coloring_rules*.json
+layout_rules*.json
+rules*.json
+*map.png
