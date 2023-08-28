@@ -2,10 +2,10 @@ use std::borrow::Borrow;
 use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
-use std::sync::{Arc, RwLock};
+use std::rc::{Rc};
+use std::sync::{RwLock};
 
 use serde::{Deserialize, Serialize};
-use rayon::prelude::*;
 
 use crate::map2d::Map2D;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
@@ -13,7 +13,7 @@ use crate::adjacency::AdjacencyGenerator;
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
 
-type Queue<AG, K, MP> = Arc<RwLock<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
+type Queue<AG, K, MP> = Rc<RwLock<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -41,7 +41,7 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 #[derive(Serialize, Deserialize)]
 pub struct MapColoringJob<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
     rules: MapColoringAssigner<K>,
-    pub map: Arc<RwLock<Map2D<AG, K, MP>>>,
+    pub map: Rc<RwLock<Map2D<AG, K, MP>>>,
     queue: Queue<AG, K, MP>,
     queue_state: QueueState
 }
@@ -50,10 +50,10 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapColor
 where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
 {
     pub fn new(rules: MapColoringAssigner<K>, map: Map2D<AG, K, MP>) -> Self {
-        let wrapped_map = Arc::new(RwLock::new(map));
+        let wrapped_map = Rc::new(RwLock::new(map));
 
         let raw_queue = BinaryHeap::new();
-        let wrapped_queue = Arc::new(RwLock::new(raw_queue));
+        let wrapped_queue = Rc::new(RwLock::new(raw_queue));
 
         Self {
             rules,
@@ -89,7 +89,7 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>>
+    pub fn assign_map(&mut self) -> &Rc<RwLock<Map2D<AG, K, MP>>>
     {
         let mut queue_writer = self.queue.write().unwrap();
         let map = &self.map;
@@ -104,8 +104,8 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         while !queue_writer.is_empty() {
             let assignee = &queue_writer.pop().unwrap().node;
             let raw_node = match assignee {
-                MapNodeWrapper::Raw(node) => Arc::new(RwLock::new(node.to_owned())),
-                MapNodeWrapper::Arc(node) => node.to_owned(),
+                MapNodeWrapper::Raw(node) => Rc::new(RwLock::new(node.to_owned())),
+                MapNodeWrapper::Rc(node) => node.to_owned(),
             };
             let mut node = raw_node.write().unwrap();
             let node_state = &node.state.to_owned();
@@ -171,109 +171,12 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>> {
+    pub fn queue_and_assign(&mut self) -> &Rc<RwLock<Map2D<AG, K, MP>>> {
         self.build_queue();
         self.assign_map()
     }
 }
 
-
-impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapColoringJob<AG, K, MP>
-where
-    AG: Send + Sync,
-    K: Send + Sync,
-    MP: Send + Sync,
-    <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
-{
-    pub fn par_assign_map(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>>
-    {
-        let mut queue_writer = self.queue.write().unwrap();
-        let map = &self.map;
-        let mut map_operator = map.write().unwrap();
-
-        let mut enqueued = HashSet::with_capacity(map_operator.undecided_tiles.len());
-        match queue_writer.peek() {
-            Some(enqueued_node) => enqueued.insert(enqueued_node.node.position()),
-            None => false
-        };
-
-        while !queue_writer.is_empty() {
-            let assignee = &queue_writer.pop().unwrap().node;
-            let raw_node = match assignee {
-                MapNodeWrapper::Raw(node) => Arc::new(RwLock::new(node.to_owned())),
-                MapNodeWrapper::Arc(node) => node.to_owned(),
-            };
-            let mut node = raw_node.write().unwrap();
-            let node_state = &node.state.to_owned();
-            let curr_pos = node.position;
-
-            enqueued.remove(&curr_pos);
-            map_operator.undecided_tiles.remove(&curr_pos);
-
-            let possibilities = match node_state {
-                MapNodeState::Undecided(probas) => probas,
-                MapNodeState::Finalized(_) => {
-                    continue
-                }
-            };
-
-            let new_assignment = possibilities.sample_with_default_rng();
-            // println!("Assigning {:?} => {:?}", node.position, new_assignment);
-
-            let self_rule_probas = match self.rules.transition_rules.get(&new_assignment) {
-                Some(probas) => probas,
-                None => continue
-            };
-
-            node.state = MapNodeState::from(new_assignment);
-
-            let neighbors = map_operator.adjacent(node.deref());
-            let par_indices = 0..neighbors.len();
-            drop(node);
-
-            par_indices.into_par_iter().for_each(|idx| {
-                let neighbor = neighbors.get(idx).unwrap();
-                // println!("Acquiring lock for neighbor {:?}...", neighbor);
-                let maybe_neighbor_rule_probas;
-                {
-                    // sub-scope to free up the reader after use
-                    let neighbor_reader = neighbor.read().unwrap();
-                    maybe_neighbor_rule_probas = match &neighbor_reader.state {
-                        MapNodeState::Undecided(probas) => Some(probas.to_owned()),
-                        MapNodeState::Finalized(_) => None
-                    };
-                }
-
-                if let Some(neighbor_rule_probas) = maybe_neighbor_rule_probas {
-                    let mut neighbor_writer = neighbor.write().unwrap();
-                    let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
-                    neighbor_writer.state = MapNodeState::from(new_possibilities);
-                    //println!("Assigned new probas for neighbor {:?}!", neighbor);
-
-                    let neigh_pos = neighbor_writer.position;
-                    drop(neighbor_writer);
-
-                    let neigh_queued = enqueued.get(&neigh_pos).is_some();
-
-                    if !neigh_queued {
-                        let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
-                        let mut sub_queue_writer = self.queue.write().unwrap();
-                        sub_queue_writer.push(wrapped_neighbor);
-                    }
-                }
-
-                // no real return value
-            });
-        };
-
-        map
-    }
-
-    pub fn par_queue_and_assign(&mut self) -> &Arc<RwLock<Map2D<AG, K, MP>>> {
-        self.build_queue();
-        self.par_assign_map()
-    }
-}
 
 #[cfg(test)]
 mod tests {

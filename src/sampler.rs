@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::sync::{Arc, Weak};
-// use std::rc::{Rc, Weak};
+// use std::sync::{Rc, Weak};
+use std::rc::{Rc, Weak};
 use rand::distributions::{Standard};
 use rand::prelude::*;
 use serde::{Serialize, Deserialize};
@@ -39,7 +39,7 @@ impl<T: Copy + Eq + Hash + Debug + Default> DistributionKey for T {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MultinomialDistribution<K: DistributionKey> {
-    weights: HashMap<Arc<K>, f32>,
+    weights: HashMap<Rc<K>, f32>,
     keys: Vec<Weak<K>>
 }
 
@@ -48,9 +48,9 @@ impl<K: DistributionKey> From<HashMap<K, f32>> for MultinomialDistribution<K> {
         let mut weightmap = HashMap::with_capacity(value.len());
         let mut weightkeys = Vec::with_capacity(value.len());
         for (key, val) in value {
-            let key_ref = Arc::new(key);
+            let key_ref = Rc::new(key);
             weightmap.insert(key_ref.to_owned(), val);
-            weightkeys.push(Arc::downgrade(&key_ref));
+            weightkeys.push(Rc::downgrade(&key_ref));
         }
         Self {
             weights: weightmap,
@@ -59,13 +59,13 @@ impl<K: DistributionKey> From<HashMap<K, f32>> for MultinomialDistribution<K> {
     }
 }
 
-impl<K: DistributionKey> From<HashMap<Arc<K>, f32>> for MultinomialDistribution<K> {
-    fn from(value: HashMap<Arc<K>, f32>) -> Self {
+impl<K: DistributionKey> From<HashMap<Rc<K>, f32>> for MultinomialDistribution<K> {
+    fn from(value: HashMap<Rc<K>, f32>) -> Self {
         let mut weightmap = HashMap::with_capacity(value.len());
         let mut weightkeys = Vec::with_capacity(value.len());
         for (key_ref, val) in value {
             weightmap.insert(key_ref.to_owned(), val);
-            weightkeys.push(Arc::downgrade(&key_ref));
+            weightkeys.push(Rc::downgrade(&key_ref));
         }
         Self {
             weights: weightmap,
@@ -93,7 +93,7 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
         Self::from(weightmap)
     }
 
-    pub fn normalized_weights(&self) -> HashMap<Arc<K>, f32> {
+    pub fn normalized_weights(&self) -> HashMap<Rc<K>, f32> {
         let total = self.total_weights();
         let mut normalized_map = HashMap::with_capacity(self.weights.len());
 
@@ -111,7 +111,7 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
         ).sum()
     }
 
-    pub fn joint_probability_weights<BMD: Borrow<Self>>(&self, other: BMD) -> HashMap<Arc<K>, f32> {
+    pub fn joint_probability_weights<BMD: Borrow<Self>>(&self, other: BMD) -> HashMap<Rc<K>, f32> {
         let normalized_other = other.borrow().normalized_weights();
         let my_weights = &self.weights;
 
@@ -144,11 +144,11 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
     // pub fn joint_probability_weights_cached(
     //     &self,
     //     other: &Self,
-    //     cache: HashMap<(&ArrayVec<(Arc<K>, f32), 100>, &ArrayVec<(Arc<K>, f32), 100>), ArrayVec<(Arc<K>, f32), 100>>
-    // ) -> HashMap<Arc<K>, f32> {
-    //     let my_weights_cachekey: ArrayVec<(Arc<K>, f32), 100> = self.weights.iter().collect();
+    //     cache: HashMap<(&ArrayVec<(Rc<K>, f32), 100>, &ArrayVec<(Rc<K>, f32), 100>), ArrayVec<(Rc<K>, f32), 100>>
+    // ) -> HashMap<Rc<K>, f32> {
+    //     let my_weights_cachekey: ArrayVec<(Rc<K>, f32), 100> = self.weights.iter().collect();
     //     let other_weights = other.normalized_weights();
-    //     let other_weights_cachekey: ArrayVec<(Arc<K>, f32), 100> = other_weights.iter().collect();
+    //     let other_weights_cachekey: ArrayVec<(Rc<K>, f32), 100> = other_weights.iter().collect();
     //     let lookup = cache.get(&(my_weights_cachekey, other_weights_cachekey))
     //
     //     self.joint_probability_weights(other)

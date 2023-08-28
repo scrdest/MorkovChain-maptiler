@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::rc::{Rc};
+use std::sync::{RwLock};
 use smallvec::SmallVec;
 use num::{Bounded, Zero};
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,7 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
             let tile_pos_x = tile_pos.get(0).unwrap().to_owned();
             let tile_pos_y = tile_pos.get(1).unwrap().to_owned();
 
-            let tile_arc = Arc::new(RwLock::new(cast_tile));
+            let tile_arc = Rc::new(RwLock::new(cast_tile));
             let tile_arc_reader = tile_arc.read().unwrap();
             let tile_pos = tile_arc_reader.position;
 
