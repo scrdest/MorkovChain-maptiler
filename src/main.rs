@@ -1,3 +1,3 @@
 fn main() {
-    morkovmap::generate_from_file(None);
+    morkovmap_rc::generate_from_file(None);
 }

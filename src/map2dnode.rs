@@ -1,5 +1,5 @@
 use std::rc::{Rc};
-use std::sync::{RwLock};
+use std::cell::{RefCell};
 use std::cmp::Ordering;
 use std::marker::PhantomData;
 use serde;
@@ -83,7 +83,7 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> Map2DNod
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum MapNodeWrapper<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
     Raw(Map2DNode<AG, K, MP>),
-    Rc(Rc<RwLock<Map2DNode<AG, K, MP>>>)
+    Rc(Rc<RefCell<Map2DNode<AG, K, MP>>>)
 }
 
 impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapNodeWrapper<AG, K, MP>
@@ -91,7 +91,7 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapNodeW
     pub fn position(&self) -> MP {
         match self {
             Self::Raw(node) => node.position,
-            Self::Rc(arc_node) => arc_node.read().unwrap().position
+            Self::Rc(arc_node) => arc_node.try_borrow().unwrap().position
         }
     }
 }
@@ -109,8 +109,8 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Map
     }
 }
 
-impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Rc<RwLock<Map2DNode<AG, K, MP>>>> for MapNodeEntropyOrdering<AG, K, MP> {
-    fn from(value: Rc<RwLock<Map2DNode<AG, K, MP>>>) -> Self {
+impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> From<Rc<RefCell<Map2DNode<AG, K, MP>>>> for MapNodeEntropyOrdering<AG, K, MP> {
+    fn from(value: Rc<RefCell<Map2DNode<AG, K, MP>>>) -> Self {
         Self {
             node: MapNodeWrapper::Rc(value)
         }
@@ -121,12 +121,12 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> PartialE
     fn eq(&self, other: &Self) -> bool {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
-            MapNodeWrapper::Rc(node_data) => node_data.read().unwrap().entropy(),
+            MapNodeWrapper::Rc(node_data) => node_data.try_borrow().unwrap().entropy(),
         };
 
         let other_entropy = match &other.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
-            MapNodeWrapper::Rc(node_data) => node_data.read().unwrap().entropy(),
+            MapNodeWrapper::Rc(node_data) => node_data.try_borrow().unwrap().entropy(),
         };
 
         my_entropy == other_entropy
@@ -139,12 +139,12 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> PartialO
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let my_entropy = match &self.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
-            MapNodeWrapper::Rc(node_data) => node_data.read().unwrap().entropy(),
+            MapNodeWrapper::Rc(node_data) => node_data.try_borrow().unwrap().entropy(),
         };
 
         let other_entropy = match &other.node {
             MapNodeWrapper::Raw(node_data) => node_data.entropy(),
-            MapNodeWrapper::Rc(node_data) => node_data.read().unwrap().entropy(),
+            MapNodeWrapper::Rc(node_data) => node_data.try_borrow().unwrap().entropy(),
         };
 
         match my_entropy == other_entropy {
@@ -163,4 +163,4 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> Ord for 
     }
 }
 
-pub type ThreadsafeNodeRef<AG, K, MP> = Rc<RwLock<Map2DNode<AG, K, MP>>>;
+pub type ThreadsafeNodeRef<AG, K, MP> = Rc<RefCell<Map2DNode<AG, K, MP>>>;

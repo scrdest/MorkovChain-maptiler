@@ -3,7 +3,7 @@ use std::collections::binary_heap::BinaryHeap;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::rc::{Rc};
-use std::sync::{RwLock};
+use std::cell::{RefCell};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ use crate::adjacency::AdjacencyGenerator;
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
 
-type Queue<AG, K, MP> = Rc<RwLock<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
+type Queue<AG, K, MP> = Rc<RefCell<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
 
 
 #[derive(Serialize, Deserialize)]
@@ -41,7 +41,7 @@ impl<K: DistributionKey> MapColoringAssigner<K> {
 #[derive(Serialize, Deserialize)]
 pub struct MapColoringJob<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
     rules: MapColoringAssigner<K>,
-    pub map: Rc<RwLock<Map2D<AG, K, MP>>>,
+    pub map: Rc<RefCell<Map2D<AG, K, MP>>>,
     queue: Queue<AG, K, MP>,
     queue_state: QueueState
 }
@@ -50,10 +50,10 @@ impl<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> MapColor
 where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
 {
     pub fn new(rules: MapColoringAssigner<K>, map: Map2D<AG, K, MP>) -> Self {
-        let wrapped_map = Rc::new(RwLock::new(map));
+        let wrapped_map = Rc::new(RefCell::new(map));
 
         let raw_queue = BinaryHeap::new();
-        let wrapped_queue = Rc::new(RwLock::new(raw_queue));
+        let wrapped_queue = Rc::new(RefCell::new(raw_queue));
 
         Self {
             rules,
@@ -64,12 +64,12 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
     }
 
     fn build_queue(&mut self) -> &Queue<AG, K, MP> {
-        let map_reader = self.map.read().unwrap();
+        let map_reader = self.map.try_borrow().unwrap();
         let wrapped_queue = &self.queue;
-        let mut queue_writer = wrapped_queue.write().unwrap();
+        let mut queue_writer = wrapped_queue.try_borrow_mut().unwrap();
 
         for tile_lock in map_reader.undecided_tiles.values() {
-            let tile_reader = tile_lock.read().unwrap();
+            let tile_reader = tile_lock.try_borrow().unwrap();
             let is_assigned = tile_reader.state.is_assigned();
             if is_assigned { continue };
 
@@ -89,11 +89,11 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         inst
     }
 
-    pub fn assign_map(&mut self) -> &Rc<RwLock<Map2D<AG, K, MP>>>
+    pub fn assign_map(&mut self) -> &Rc<RefCell<Map2D<AG, K, MP>>>
     {
-        let mut queue_writer = self.queue.write().unwrap();
+        let mut queue_writer = self.queue.try_borrow_mut().unwrap();
         let map = &self.map;
-        let mut map_operator = map.write().unwrap();
+        let mut map_operator = map.try_borrow_mut().unwrap();
 
         let mut enqueued = HashSet::with_capacity(map_operator.undecided_tiles.len());
         match queue_writer.peek() {
@@ -104,10 +104,10 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         while !queue_writer.is_empty() {
             let assignee = &queue_writer.pop().unwrap().node;
             let raw_node = match assignee {
-                MapNodeWrapper::Raw(node) => Rc::new(RwLock::new(node.to_owned())),
+                MapNodeWrapper::Raw(node) => Rc::new(RefCell::new(node.to_owned())),
                 MapNodeWrapper::Rc(node) => node.to_owned(),
             };
-            let mut node = raw_node.write().unwrap();
+            let mut node = raw_node.try_borrow_mut().unwrap();
             let node_state = &node.state.to_owned();
             let curr_pos = node.position;
 
@@ -139,7 +139,7 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
                 let maybe_neighbor_rule_probas;
                 {
                     // sub-scope to free up the reader after use
-                    let neighbor_reader = neighbor.read().unwrap();
+                    let neighbor_reader = neighbor.try_borrow().unwrap();
                     maybe_neighbor_rule_probas = match &neighbor_reader.state {
                         MapNodeState::Undecided(probas) => Some(probas.to_owned()),
                         MapNodeState::Finalized(_) => None
@@ -147,7 +147,7 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
                 }
 
                 if let Some(neighbor_rule_probas) = maybe_neighbor_rule_probas {
-                    let mut neighbor_writer = neighbor.write().unwrap();
+                    let mut neighbor_writer = neighbor.try_borrow_mut().unwrap();
                     let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
                     //println!("Assigned new probas for neighbor {:?}!", neighbor);
@@ -171,7 +171,7 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         map
     }
 
-    pub fn queue_and_assign(&mut self) -> &Rc<RwLock<Map2D<AG, K, MP>>> {
+    pub fn queue_and_assign(&mut self) -> &Rc<RefCell<Map2D<AG, K, MP>>> {
         self.build_queue();
         self.assign_map()
     }
@@ -225,10 +225,10 @@ mod tests {
 
         let assignment_rules = MapColoringAssigner::with_rules(rules);
         let mut job = MapColoringJob::new_with_queue(assignment_rules, testmap);
-        let pre_run_state = &job.map.read().unwrap().undecided_tiles.to_owned();
+        let pre_run_state = &job.map.try_borrow().unwrap().undecided_tiles.to_owned();
         assert!(pre_run_state.len() > 0);
         job.queue_and_assign();
-        let post_run_state = &job.map.read().unwrap().undecided_tiles.to_owned();
+        let post_run_state = &job.map.try_borrow().unwrap().undecided_tiles.to_owned();
         assert_eq!(post_run_state.len(), 0);
     }
 }

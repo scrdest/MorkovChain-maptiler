@@ -105,7 +105,7 @@ where MP::Key: PositionKey + NumCast + Into<u32>
         );
 
         for tile in &map.tiles {
-            let tilereader = tile.read().unwrap();
+            let tilereader = tile.try_borrow().unwrap();
             let assignment = match &tilereader.state {
                 MapNodeState::Finalized(asgn) => asgn,
                 MapNodeState::Undecided(_) => continue

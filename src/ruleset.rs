@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::Error;
 use std::path::Path;
 use std::rc::{Rc};
-use std::sync::{RwLock};
+use std::cell::{RefCell};
 use std::usize;
 use itertools::Itertools;
 use num::{Bounded, NumCast, range_inclusive, Zero};
@@ -222,7 +222,7 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
 
         let mut job = MapColoringJob::new_with_queue(assignment_rules, gen_map);
         let map_result = job.queue_and_assign();
-        let map_reader = map_result.read().unwrap();
+        let map_reader = map_result.try_borrow().unwrap();
 
         visualiser.visualise(&map_reader, None);
     }
@@ -270,7 +270,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
         src_map: &Map2D<AG, DK, MP>,
         start_pos: [MP::Key; 2],
         end_pos: [MP::Key; 2]
-    ) -> Rc<RwLock<Map2D<AG, DK, MP>>> where
+    ) -> Rc<RefCell<Map2D<AG, DK, MP>>> where
         AG: AdjacencyGenerator<2, Input = MP> + Send + Sync,
         MP: MapPosition<2> + Send + Sync,
         MP::Key: PositionKey + NumCast + Into<u32> + Send + Sync
@@ -317,7 +317,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             }
         ).map(
             |tile| {
-                let tile_reader = tile.read().unwrap();
+                let tile_reader = tile.try_borrow().unwrap();
                 let pos = tile_reader.position.get_dims();
                 let adj_pos = MP::from_dims([pos[0], pos[1] - unity]);
                 (tile, adj_pos)
@@ -330,7 +330,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
                 let map_tile = src_map.get(map_pos);
                 map_tile
             }).map(|tile| {
-                let tile_reader = tile.read().unwrap();
+                let tile_reader = tile.try_borrow().unwrap();
                 let pos = tile_reader.position.get_dims();
                 let adj_pos = MP::from_dims([pos[0], pos[1] + unity]);
                 (tile, adj_pos)
@@ -346,7 +346,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
             }
         ).map(
             |tile| {
-                let tile_reader = tile.read().unwrap();
+                let tile_reader = tile.try_borrow().unwrap();
                 let pos = tile_reader.position.get_dims();
                 let adj_pos = MP::from_dims([pos[0] - unity, pos[1]]);
                 (tile, adj_pos)
@@ -359,7 +359,7 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
                 let map_tile = src_map.get(map_pos);
                 map_tile
             }).map(|tile| {
-                let tile_reader = tile.read().unwrap();
+                let tile_reader = tile.try_borrow().unwrap();
                 let pos = tile_reader.position.get_dims();
                 let adj_pos = MP::from_dims([pos[0] + unity, pos[1]]);
                 (tile, adj_pos)
@@ -369,11 +369,11 @@ impl<DK: DistributionKey + Send + Sync> GeneratorRuleset<DK> {
         edge_tiles_x
             .chain(edge_tiles_y)
             .for_each(|(tile, adj_pos)| {
-                let mut tile_writer = tile.write().unwrap();
+                let mut tile_writer = tile.try_borrow_mut().unwrap();
                 let raw_assigned_neighbor = src_map.get(adj_pos);
                 
                 if let Some(assigned_neighbor) = raw_assigned_neighbor {
-                    let neigh_reader = assigned_neighbor.read().unwrap();
+                    let neigh_reader = assigned_neighbor.try_borrow().unwrap();
                     let neigh_dist = match &neigh_reader.state {
                         MapNodeState::Undecided(distribution) => distribution.to_owned(),
                         MapNodeState::Finalized(assignment) => MultinomialDistribution::uniform_over(
