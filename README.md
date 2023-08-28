@@ -1,5 +1,20 @@
  Morkov Maptiler 
 =================
+
+### NOTE: this is a *SINGLE-THREADED* variant of the [morkovmap](https://crates.io/crates/morkovmap) crate.
+
+This is a non-threadsafe variant that may or may not be 
+faster than the threadsafe one (although on smaller maps, it 
+definitely is at least 10% faster)
+
+How fast? 
+
+***30x30 at 30*** - a 900-tile map at 30 FPS 
+with a bunch of time to spare, with rendering included.
+
+This crate will track the main `morkovmap`'s semver major 
+and minor versions, but *may diverge on patch versions*.
+
 ## Data-driven procedural map generation
 
 ### Landmasses:
