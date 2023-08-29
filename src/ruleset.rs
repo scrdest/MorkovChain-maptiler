@@ -17,9 +17,11 @@ use crate::assigner::{MapColoringAssigner, MapColoringJob};
 use crate::map2d::Map2D;
 use crate::map2dnode::{Map2DNode, MapNodeState};
 use crate::mapgen_presets;
-use crate::position::{MapPosition, PositionKey};
+use crate::position::{ConvertibleMapPosition, MapPosition, PositionKey};
+use crate::position2d::CompactMapPosition;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
-use crate::visualizers::{MapColor, MapVisualizer, RilPixelVisualizer};
+// use crate::visualizers::{JsonDataVisualizer, MapColor, MapVisualizer, RilPixelVisualizer};
+use crate::visualizers::{JsonDataVisualizer, MapColor, MapVisualizer};
 
 
 #[derive(Serialize, Deserialize)]
@@ -129,7 +131,7 @@ impl GeneratorRuleset<i8> {
     }
 }
 
-impl<DK: DistributionKey> GeneratorRuleset<DK> {
+impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
     pub fn default_map_builder<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, map_size: u32) -> Map2D<AG, DK, MP>
         where MP::Key: PositionKey + NumCast
     {
@@ -213,7 +215,7 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
     /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
     ///
     pub fn generate_with_visualizer<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>, V: MapVisualizer<AG, DK, MP>>(&self, init_map: Option<Map2D<AG, DK, MP>>, visualiser: V)
-        where MP::Key: PositionKey + NumCast
+        where MP::Key: PositionKey + NumCast + Serialize
     {
         let assignment_rules = self.layout_rules.to_owned();
         let gen_map = init_map.unwrap_or_else(
@@ -239,11 +241,15 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
     ///
     /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
     ///
-    pub fn generate_map<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>>(&self, init_map: Option<Map2D<AG, DK, MP>>)
-        where MP::Key: PositionKey + NumCast + Into<u32>
+    pub fn generate_map<AG: AdjacencyGenerator<2, Input = MP>, PK, MP>(&self, init_map: Option<Map2D<AG, DK, MP>>)
+        where
+            PK: PositionKey + NumCast + Into<u32> + Serialize,
+            MP: MapPosition<2, Key=PK> + ConvertibleMapPosition<2, PK, CompactMapPosition<PK>>
     {
-        let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
+        // let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
+        // self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
+        let visualizer = JsonDataVisualizer::new();
+        self.generate_with_visualizer::<AG, MP, JsonDataVisualizer>(init_map, visualizer)
     }
 
     /// Creates a filled (i.e. 'collapsed') map from scratch,
@@ -255,10 +261,12 @@ impl<DK: DistributionKey> GeneratorRuleset<DK> {
     ///
     /// **Returns**: nothing (i.e. Unit); a render will be created as a side-effect.
     ///
-    pub fn generate<AG: AdjacencyGenerator<2, Input = MP>, MP: MapPosition<2>>(&self)
-        where MP::Key: PositionKey + NumCast + Into<u32>
+    pub fn generate<AG: AdjacencyGenerator<2, Input = MP>, PK, MP: MapPosition<2, Key=PK>>(&self)
+        where
+            PK: PositionKey + NumCast + Into<u32> + Serialize,
+            MP: MapPosition<2, Key=PK> + ConvertibleMapPosition<2, PK, CompactMapPosition<PK>>
     {
-        self.generate_map::<AG, MP>(None)
+        self.generate_map::<AG, PK, MP>(None)
     }
 }
 

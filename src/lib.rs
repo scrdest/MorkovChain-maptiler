@@ -1,3 +1,4 @@
+use serde::Serialize;
 use crate::adjacency::{OctileAdjacencyGenerator, CardinalAdjacencyGenerator};
 use crate::position2d::Position2D;
 use crate::ruleset::GeneratorRuleset;
@@ -29,29 +30,29 @@ fn generate(colormap_path: Option<&str>, rule_path: Option<&str>, map_size: Opti
     ));
     rules.save(COMBINED_RULESET_FILENAME);
     match rules.map_size {
-        0..=254 => rules.generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-        255..=65534 => rules.generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-        _ => rules.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+        0..=254 => rules.generate::<OctileAdjacencyGenerator<Position2D<u8>>, u8, Position2D<u8>>(),
+        255..=65534 => rules.generate::<OctileAdjacencyGenerator<Position2D<u16>>, u16, Position2D<u16>>(),
+        _ => rules.generate::<OctileAdjacencyGenerator<Position2D<u32>>, u32, Position2D<u32>>()
     };
 }
 
 
 #[allow(dead_code)]
-fn generate_from_ruleset<T: DistributionKey>(ruleset: &GeneratorRuleset<T>) {
+fn generate_from_ruleset<T: DistributionKey + Serialize>(ruleset: &GeneratorRuleset<T>) {
     let normalized_adjacency = ruleset.adjacency.as_ref().map(
         |s| s.as_str().trim().to_lowercase()
     ).unwrap_or_default();
 
     match normalized_adjacency.as_str() {
         "cardinal" => match ruleset.map_size {
-            0..=254 => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-            255..=65534 => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-            _ => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+            0..=254 => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u8>>, u8, Position2D<u8>>(),
+            255..=65534 => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u16>>, u16, Position2D<u16>>(),
+            _ => ruleset.generate::<CardinalAdjacencyGenerator<Position2D<u32>>, u32, Position2D<u32>>()
         },
         "octile" | _ => match ruleset.map_size {
-            0..=254 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u8>>, Position2D<u8>>(),
-            255..=65534 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u16>>, Position2D<u16>>(),
-            _ => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u32>>, Position2D<u32>>()
+            0..=254 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u8>>, u8, Position2D<u8>>(),
+            255..=65534 => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u16>>, u16, Position2D<u16>>(),
+            _ => ruleset.generate::<OctileAdjacencyGenerator<Position2D<u32>>, u32, Position2D<u32>>()
         },
     }
 }

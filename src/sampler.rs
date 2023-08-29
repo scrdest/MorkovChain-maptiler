@@ -3,39 +3,13 @@ use std::collections::{HashMap, HashSet};
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::Hash;
-// use std::sync::{Rc, Weak};
 use std::rc::{Rc, Weak};
 use rand::distributions::{Standard};
 use rand::prelude::*;
 use serde::{Serialize, Deserialize};
 
-// enum Floatey {
-//     Standard(f32),
-//     Double(f64),
-// }
-//
-// impl Into<f64> for Floatey {
-//     fn into(self) -> f64 {
-//         match self {
-//             Floatey::Standard(x) => x.into(),
-//             Floatey::Double(y) => y
-//         }
-//     }
-// }
-
 pub trait  DistributionKey: Copy + Eq + Hash + Debug + Default {}
 impl<T: Copy + Eq + Hash + Debug + Default> DistributionKey for T {}
-
-// pub trait Sample<K: DistributionKey> {
-//     fn sample(&self) -> Option<K>;
-// }
-
-// impl<K: DistributionKey, T: Distribution<K>, R: Rng> Sample<K> for T {
-//     fn sample(&self) -> K {
-//         let mut rng: R = R::new();
-//         Distribution::sample(&self, &mut rng)
-//     }
-// }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MultinomialDistribution<K: DistributionKey> {
@@ -179,10 +153,6 @@ impl<K: DistributionKey> rand::distributions::Distribution<K> for MultinomialDis
             }
         }
 
-        // match curr_candidate {
-        //     Some(good_candidate) => *good_candidate,
-        //     None => MaybeDistributionKey::None
-        // }
         *curr_candidate.unwrap_or(K::default().into())
     }
 }

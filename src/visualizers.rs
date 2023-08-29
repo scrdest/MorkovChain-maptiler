@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs::File;
 use num::{Bounded, NumCast, One};
 use crate::map2d::Map2D;
 use crate::sampler::DistributionKey;
@@ -8,8 +10,9 @@ use ril;
 use ril::{Draw, Rgb};
 use serde::{Deserialize, Serialize};
 use crate::adjacency::AdjacencyGenerator;
-use crate::map2dnode::MapNodeState;
-use crate::position::{MapPosition, PositionKey};
+use crate::map2dnode::{Map2DNode, MapNodeState};
+use crate::position::{ConvertibleMapPosition, MapPosition, PositionKey};
+use crate::position2d::CompactMapPosition;
 
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -157,3 +160,119 @@ where MP::Key: PositionKey + NumCast + Into<u32>
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct JsonDataVisualizer {}
+
+impl JsonDataVisualizer {
+    pub fn new() -> Self {
+        Self {
+
+        }
+    }
+}
+
+
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Map2DNodeSerialized<K: DistributionKey, MP: MapPosition<2>> {
+    #[serde(rename(serialize = "p", deserialize = "position"))]
+    pub(crate) position: MP,
+
+    #[serde(rename(serialize = "s", deserialize = "state"))]
+    pub(crate) state: K,
+}
+
+// #[derive(Clone, Serialize, Deserialize)]
+// #[serde(transparent)]
+// pub struct Map2DNodeSerializedStr {
+//     pub(crate) data: String
+// }
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+struct SerializableMap2D<
+    K: DistributionKey + Serialize,
+    MP: MapPosition<2> + Serialize
+> {
+    pub tiles: Vec<Map2DNodeSerialized<K, MP>>,
+    // position_index: HashMap<MP, Map2DNodeSerialized<K, MP>>,
+    // pub(crate) min_pos: MP,
+    // pub(crate) max_pos: MP,
+}
+
+impl<
+    AG: AdjacencyGenerator<2>,
+    K: DistributionKey + Serialize,
+    T: PositionKey + Serialize,
+    MP: MapPosition<2, Key=T> + ConvertibleMapPosition<2, T, CompactMapPosition<T>>
+> From<&Map2D<AG, K, MP>> for SerializableMap2D<K, CompactMapPosition<T>>
+{
+    fn from(value: &Map2D<AG, K, MP>) -> Self {
+        let nodes = value.tiles.iter().map(
+            |raw_tile| {
+                let a: &RefCell<Map2DNode<AG, K, MP>> = raw_tile.borrow();
+                let owned_tile = a.to_owned().into_inner();
+
+                let state = match owned_tile.state {
+                    MapNodeState::Finalized(stateval) => stateval,
+                    _ => panic!("Undecided tiles left!")
+                };
+
+                let position = owned_tile.position.convert();
+
+                Map2DNodeSerialized {
+                    position,
+                    state
+                }
+            }
+        );
+
+        let size_estimate = value.tiles.len();
+        let mut tile_vec: Vec<Map2DNodeSerialized<K, CompactMapPosition<MP::Key>>> = Vec::with_capacity(size_estimate);
+        // let mut position_hashmap: HashMap<MP, Map2DNodeSerialized<K, MP>> = HashMap::with_capacity(size_estimate);
+
+        nodes.for_each(|node| {
+            tile_vec.push(node);
+            // position_hashmap.insert(node.position.to_owned(), node);
+        });
+
+        Self {
+            tiles: tile_vec,
+            // position_index: position_hashmap,
+            // min_pos: value.min_pos,
+            // max_pos: value.max_pos
+        }
+    }
+}
+
+
+impl<AG: AdjacencyGenerator<2>, DK: DistributionKey + Serialize, PK, MP>
+MapVisualizer<AG, DK, MP> for JsonDataVisualizer
+where
+    PK: PositionKey + NumCast + Into<u32> + Serialize,
+    MP: MapPosition<2, Key=PK> + ConvertibleMapPosition<2, PK, CompactMapPosition<PK>>
+{
+    type Output = ();
+    type Args = String;
+
+    fn visualise(&self, map: &Map2D<AG, DK, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
+        let fname = output.unwrap_or(Self::Args::from("genmap.json"));
+
+        let castmap = SerializableMap2D::from(map);
+
+        let result = serde_json::to_writer(
+            File::create(fname).unwrap(),
+            &castmap
+        );
+
+        match result {
+            Ok(_) => Some(()),
+            Err(err) => {
+                eprintln!("{}", err);
+                None
+            }
+        }
+    }
+}
+

@@ -3,4 +3,5 @@
 coloring_rules*.json
 layout_rules*.json
 rules*.json
+genmap.json
 *map.png
