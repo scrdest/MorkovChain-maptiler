@@ -1,8 +1,9 @@
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug};
 use std::fs::File;
+use itertools::Itertools;
 use num::{Bounded, NumCast, One};
 use crate::map2d::Map2D;
 use crate::sampler::DistributionKey;
@@ -246,6 +247,67 @@ impl<
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+struct CompactedSerializableMap2D {
+    pub tiles: Vec<String>
+}
+
+impl<
+    AG: AdjacencyGenerator<2>,
+    K: DistributionKey + Serialize,
+    T: PositionKey + Serialize,
+    MP: MapPosition<2, Key=T> + ConvertibleMapPosition<2, T, CompactMapPosition<T>>
+> From<&Map2D<AG, K, MP>> for CompactedSerializableMap2D
+{
+    fn from(value: &Map2D<AG, K, MP>) -> Self {
+        let nodes = value.tiles.iter().map(
+            |raw_tile| {
+                let a: &RefCell<Map2DNode<AG, K, MP>> = raw_tile.borrow();
+                let owned_tile = a.to_owned().into_inner();
+
+                let state = match owned_tile.state {
+                    MapNodeState::Finalized(stateval) => stateval,
+                    _ => panic!("Undecided tiles left!")
+                };
+
+                let position = owned_tile.position.convert();
+
+
+                Map2DNodeSerialized {
+                    position,
+                    state
+                }
+            }
+        );
+
+        let strings = nodes.map(
+            |node| {
+                let dims = node.position.get_dims().map(
+                    |dim| serde_json::to_string(&dim).unwrap()
+                );
+                let state = serde_json::to_string(&node.state).unwrap();
+
+                let str_node = format!("{s}@{x},{y}", s=state, x=dims[0], y=dims[1]);
+                str_node
+            }
+        );
+
+        let size_estimate = value.tiles.len();
+        let mut tile_vec: Vec<String> = Vec::with_capacity(size_estimate);
+        // let mut position_hashmap: HashMap<MP, Map2DNodeSerialized<K, MP>> = HashMap::with_capacity(size_estimate);
+
+        strings.for_each(|node| {
+            tile_vec.push(node);
+            // position_hashmap.insert(node.position.to_owned(), node);
+        });
+
+        Self {
+            tiles: tile_vec
+        }
+    }
+}
+
 
 impl<AG: AdjacencyGenerator<2>, DK: DistributionKey + Serialize, PK, MP>
 MapVisualizer<AG, DK, MP> for JsonDataVisualizer
@@ -259,11 +321,11 @@ where
     fn visualise(&self, map: &Map2D<AG, DK, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
         let fname = output.unwrap_or(Self::Args::from("genmap.json"));
 
-        let castmap = SerializableMap2D::from(map);
+        let castmap = CompactedSerializableMap2D::from(map);
 
         let result = serde_json::to_writer(
             File::create(fname).unwrap(),
-            &castmap
+            &castmap.tiles
         );
 
         match result {

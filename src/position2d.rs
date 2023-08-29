@@ -1,7 +1,8 @@
 use std::borrow::Borrow;
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add};
 use serde;
-use serde::Serialize;
+use serde::{Serialize};
 use crate::adjacency::AdjacencyGenerator;
 use crate::position::{PositionKey};
 use crate::position::{ConvertibleMapPosition, MapPosition};
@@ -83,6 +84,12 @@ impl<P: PositionKey + Into<u32> + Serialize> ConvertibleMapPosition<2, u32, Posi
 #[serde(transparent)]
 pub struct CompactMapPosition<P: PositionKey + Serialize> {
     pos: [P; 2]
+}
+
+impl<P: PositionKey + Serialize + Display> Display for CompactMapPosition<P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{x},{y}", x=self.pos[0], y=self.pos[1])
+    }
 }
 
 impl<P: PositionKey + Serialize> From<Position2D<P>> for CompactMapPosition<P> {
