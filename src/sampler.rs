@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -7,19 +7,20 @@ use std::rc::{Rc, Weak};
 use rand::distributions::{Standard};
 use rand::prelude::*;
 use serde::{Serialize, Deserialize};
+use crate::types::GridMapDs;
 
-pub trait  DistributionKey: Copy + Eq + Hash + Debug + Default {}
+pub trait DistributionKey: Copy + Eq + Hash + Debug + Default {}
 impl<T: Copy + Eq + Hash + Debug + Default> DistributionKey for T {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MultinomialDistribution<K: DistributionKey> {
-    weights: HashMap<Rc<K>, f32>,
+    weights: GridMapDs<Rc<K>, f32>,
     keys: Vec<Weak<K>>
 }
 
-impl<K: DistributionKey> From<HashMap<K, f32>> for MultinomialDistribution<K> {
-    fn from(value: HashMap<K, f32>) -> Self {
-        let mut weightmap = HashMap::with_capacity(value.len());
+impl<K: DistributionKey> From<GridMapDs<K, f32>> for MultinomialDistribution<K> {
+    fn from(value: GridMapDs<K, f32>) -> Self {
+        let mut weightmap = GridMapDs::with_capacity(value.len());
         let mut weightkeys = Vec::with_capacity(value.len());
         for (key, val) in value {
             let key_ref = Rc::new(key);
@@ -33,9 +34,9 @@ impl<K: DistributionKey> From<HashMap<K, f32>> for MultinomialDistribution<K> {
     }
 }
 
-impl<K: DistributionKey> From<HashMap<Rc<K>, f32>> for MultinomialDistribution<K> {
-    fn from(value: HashMap<Rc<K>, f32>) -> Self {
-        let mut weightmap = HashMap::with_capacity(value.len());
+impl<K: DistributionKey> From<GridMapDs<Rc<K>, f32>> for MultinomialDistribution<K> {
+    fn from(value: GridMapDs<Rc<K>, f32>) -> Self {
+        let mut weightmap = GridMapDs::with_capacity(value.len());
         let mut weightkeys = Vec::with_capacity(value.len());
         for (key_ref, val) in value {
             weightmap.insert(key_ref.to_owned(), val);
@@ -48,7 +49,7 @@ impl<K: DistributionKey> From<HashMap<Rc<K>, f32>> for MultinomialDistribution<K
     }
 }
 
-impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
+impl<K: DistributionKey> MultinomialDistribution<K> {
     pub fn total_weights(&self) -> f32 {
         let mut total = 0.0;
         for weight in self.weights.values() {
@@ -60,16 +61,16 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
     pub fn uniform_over<I: IntoIterator<Item=K>>(keys: I) -> Self {
         let iterator = keys.into_iter();
         let size_estimate = iterator.size_hint().1.unwrap_or( iterator.size_hint().0);
-        let mut weightmap: HashMap<K, f32> = HashMap::with_capacity(size_estimate);
+        let mut weightmap: GridMapDs<K, f32> = GridMapDs::with_capacity(size_estimate);
         for key in iterator {
             weightmap.insert(key.to_owned(), 1.);
         }
         Self::from(weightmap)
     }
 
-    pub fn normalized_weights(&self) -> HashMap<Rc<K>, f32> {
+    pub fn normalized_weights(&self) -> GridMapDs<Rc<K>, f32> {
         let total = self.total_weights();
-        let mut normalized_map = HashMap::with_capacity(self.weights.len());
+        let mut normalized_map = GridMapDs::with_capacity(self.weights.len());
 
         for (k, v) in self.weights.iter() {
             let normalized_v = v / total;
@@ -85,7 +86,7 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
         ).sum()
     }
 
-    pub fn joint_probability_weights<BMD: Borrow<Self>>(&self, other: BMD) -> HashMap<Rc<K>, f32> {
+    pub fn joint_probability_weights<BMD: Borrow<Self>>(&self, other: BMD) -> GridMapDs<Rc<K>, f32> {
         let normalized_other = other.borrow().normalized_weights();
         let my_weights = &self.weights;
 
@@ -100,7 +101,7 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
 
         let union_keys = union_keys;
 
-        let mut probability_map = HashMap::with_capacity(union_keys.len());
+        let mut probability_map = GridMapDs::with_capacity(union_keys.len());
 
         for key in union_keys {
             let my_weight = my_weights.get(key).unwrap_or(&0.);
@@ -118,8 +119,8 @@ impl<K: DistributionKey + Copy> MultinomialDistribution<K> {
     // pub fn joint_probability_weights_cached(
     //     &self,
     //     other: &Self,
-    //     cache: HashMap<(&ArrayVec<(Rc<K>, f32), 100>, &ArrayVec<(Rc<K>, f32), 100>), ArrayVec<(Rc<K>, f32), 100>>
-    // ) -> HashMap<Rc<K>, f32> {
+    //     cache: GridMapDs<(&ArrayVec<(Rc<K>, f32), 100>, &ArrayVec<(Rc<K>, f32), 100>), ArrayVec<(Rc<K>, f32), 100>>
+    // ) -> GridMapDs<Rc<K>, f32> {
     //     let my_weights_cachekey: ArrayVec<(Rc<K>, f32), 100> = self.weights.iter().collect();
     //     let other_weights = other.normalized_weights();
     //     let other_weights_cachekey: ArrayVec<(Rc<K>, f32), 100> = other_weights.iter().collect();

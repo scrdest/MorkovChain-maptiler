@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 use arrayvec::ArrayVec;
-use num::{One, Zero};
+use num::{CheckedAdd, CheckedSub, One, Zero};
 use crate::position::MapPosition;
 
 
@@ -38,10 +38,15 @@ impl<MP: MapPosition<2>> AdjacencyGenerator<2> for CardinalAdjacencyGenerator<MP
                 if offset == type_unity {
                     continue
                 };
-                let true_offset = offset - type_unity;
 
                 let mut pos_buffer = bound_position.get_dims();
-                pos_buffer[dim] = pos_buffer[dim] + true_offset;
+                let new_dim = pos_buffer[dim]
+                    .checked_add(&offset)
+                    .and_then(|nu_dim| nu_dim.checked_sub(&type_unity));
+
+                if new_dim.is_none() { continue };
+
+                pos_buffer[dim] = new_dim.unwrap();
 
                 let new_pos = MP::from_dims(pos_buffer);
 
@@ -74,23 +79,38 @@ impl<MP: MapPosition<2>> AdjacencyGenerator<2> for OctileAdjacencyGenerator<MP>
             type_three
         );
 
-        for raw_x_dim in x_range {
-            let x_dim = raw_x_dim - type_unity;
+        for x_dim in x_range {
+            let new_x = pos_array[0]
+            .checked_add(&x_dim) // should be saturating I guess?
+            .and_then(|nu_x|
+                nu_x.checked_sub(&type_unity)
+            );
+
+            if new_x.is_none() { continue };
 
             let y_range = num::range(
                 MP::Key::zero(),
                 type_three
             );
 
-            for raw_y_dim in y_range {
-                if raw_x_dim.is_one() && raw_y_dim.is_one() {
-                    continue
+            for y_dim in y_range {
+                if x_dim.is_one() && y_dim.is_one() {
+                    continue // would just return input pos
                 };
-                let y_dim = raw_y_dim - type_unity;
+
+                let new_y = pos_array[1]
+                .checked_add(&y_dim) // should be saturating I guess?
+                .and_then(|nu_y|
+                    nu_y.checked_sub(&type_unity)
+                );
+
+                if new_y.is_none() { continue };
+
                 let new_pos = MP::from_dims([
-                    pos_array[0] + x_dim,
-                    pos_array[1] + y_dim
+                    new_x.unwrap(),
+                    new_y.unwrap()
                 ]);
+
                 adjacents.push(new_pos);
             }
         }

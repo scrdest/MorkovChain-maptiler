@@ -1,7 +1,8 @@
-use std::collections::HashMap;
 use std::fs::File;
 use crate::assigner::MapColoringAssigner;
 use crate::sampler::MultinomialDistribution;
+use crate::types::GridMapDs;
+use crate::types::PossiblyDirectedMultinomialDistribution::Undirected;
 use super::visualizers::MapColor;
 
 // pub(crate) const NULL_NAME: i8 = 0;
@@ -14,8 +15,8 @@ pub const TUNNELS_COLORMAP_FILENAME: &str = "morkovmap_colormap_tunnel.json";
 pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 
 
-// fn tunnels_generate_colormap() -> HashMap<i8, MapColor> {
-//     let colormap: HashMap<i8, MapColor> = HashMap::from_iter([
+// fn tunnels_generate_colormap() -> GridMapDs<i8, MapColor> {
+//     let colormap: GridMapDs<i8, MapColor> = GridMapDs::from_iter([
 //         (CORRIDOR, ril::Rgb::new(100, 110, 115).into()),
 //         // (tunnel_name_mapping("entryway"), ril::Rgb::new(70, 180, 70).into()),
 //         // (tunnel_name_mapping("room"), ril::Rgb::new(70, 160, 70).into()),
@@ -30,12 +31,12 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //
 // fn tunnels_generate_rules() -> MapColoringAssigner<i8> {
 //     let colormap = read_colormap(TUNNELS_COLORMAP_FILENAME);
-//     let rules = HashMap::from([
+//     let rules = GridMapDs::from([
 //         // undecided
 //         (NULL_NAME, MultinomialDistribution::uniform_over(colormap.keys().into_iter().map(|k| k.to_owned()))),
 //         // corridor floor
 //         (CORRIDOR, MultinomialDistribution::from(
-//             HashMap::from([
+//             GridMapDs::from([
 //                 (CORRIDOR, 5.),
 //                 // (tunnel_name_mapping("entryway"), 1.),
 //                 // (tunnel_name_mapping("room"), 5.),
@@ -44,7 +45,7 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //         )),
 //         // entryway floor
 //         // (tunnel_name_mapping("entryway"), MultinomialDistribution::from(
-//         //     HashMap::from([
+//         //     GridMapDs::from([
 //         //         (CORRIDOR, 10.),
 //         //         (tunnel_name_mapping("entryway"), 1.),
 //         //         (tunnel_name_mapping("room"), 1.),
@@ -54,14 +55,14 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //         // )),
 //         // inner floor
 //         // (tunnel_name_mapping("room"), MultinomialDistribution::from(
-//         //     HashMap::from([
+//         //     GridMapDs::from([
 //         //         (tunnel_name_mapping("entryway"), 10.),
 //         //         (tunnel_name_mapping("room"), 1.),
 //         //     ])
 //         // )),
 //         // walls
 //         (WALL, MultinomialDistribution::from(
-//             HashMap::from([
+//             GridMapDs::from([
 //                 (CORRIDOR, 15.),
 //                 // (tunnel_name_mapping("room"), 0.000001),
 //                 // (tunnel_name_mapping("entryway"), 0.000001),
@@ -72,7 +73,7 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //         )),
 //         // door
 //         (DOOR, MultinomialDistribution::from(
-//             HashMap::from([
+//             GridMapDs::from([
 //                 (CORRIDOR, 8.),
 //                 (WALL, 2.),
 //                 // (tunnel_name_mapping("window"), 1.),
@@ -80,7 +81,7 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //         )),
 //         // space
 //         (SPACE, MultinomialDistribution::from(
-//             HashMap::from([
+//             GridMapDs::from([
 //                 (WALL, 1.),
 //                 (SPACE, 20.),
 //                 // (tunnel_name_mapping("window"), 1.),
@@ -88,7 +89,7 @@ pub const TUNNELS_RULESET_FILENAME: &str = "morkovmap_rules_tunnel.json";
 //         )),
 //         // glass
 //         // (tunnel_name_mapping("window"), MultinomialDistribution::from(
-//         //     HashMap::from([
+//         //     GridMapDs::from([
 //         //         (CORRIDOR, 2.),
 //         //         (WALL, 2.),
 //         //         SPACE, 4.),
@@ -111,8 +112,8 @@ pub const LANDMASS_COLORMAP_FILENAME: &str = "morkovmap_colormap_landmass.json";
 pub const LANDMASS_RULESET_FILENAME: &str = "morkovmap_rules_landmass.json";
 
 
-fn landmass_generate_colormap() -> HashMap<i8, MapColor> {
-    let colormap: HashMap<i8, MapColor> = HashMap::from_iter([
+fn landmass_generate_colormap() -> GridMapDs<i8, MapColor> {
+    let colormap: GridMapDs<i8, MapColor> = GridMapDs::from_iter([
         (WATER, ril::Rgb::new(50, 50, 225).into()),
         (GRASS, ril::Rgb::new(50, 200, 50).into()),
         (SAND, ril::Rgb::new(200, 200, 50).into()),
@@ -124,66 +125,66 @@ fn landmass_generate_colormap() -> HashMap<i8, MapColor> {
 
 
 fn landmass_generate_rules() -> MapColoringAssigner<i8> {
-    let rules = HashMap::from([
+    let rules = GridMapDs::from([
         // water
-        (WATER, MultinomialDistribution::from(
-            HashMap::from([
+        (WATER, Undirected(MultinomialDistribution::from(
+            GridMapDs::from([
                 (WATER, 45.),
                 (SAND, 1.),
                 // (ROCKY, 0.000001),
             ])
-        )),
+        ))),
         // grass
-        (GRASS, MultinomialDistribution::from(
-            HashMap::from([
+        (GRASS, Undirected(MultinomialDistribution::from(
+            GridMapDs::from([
                 (GRASS, 80.),
                 (SAND, 5.),
                 (SNOW, 3.),
                 (ROCKY, 1.),
-            ])
+            ]))
         )),
         // sand
-        (SAND, MultinomialDistribution::from(
-            HashMap::from([
+        (SAND, Undirected(MultinomialDistribution::from(
+            GridMapDs::from([
                 (1, 50.),
                 (GRASS, 40.),
                 (SAND, 30.),
                 (ROCKY, 0.000001),
             ])
-        )),
+        ))),
         // snow
-        (SNOW, MultinomialDistribution::from(
-            HashMap::from([
+        (SNOW, Undirected(MultinomialDistribution::from(
+            GridMapDs::from([
                 (GRASS, 10.),
                 (SAND, 1.),
                 (SNOW, 25.),
                 (ROCKY, 5.),
             ])
-        )),
+        ))),
         // rocky
-        (ROCKY, MultinomialDistribution::from(
-            HashMap::from([
+        (ROCKY, Undirected(MultinomialDistribution::from(
+            GridMapDs::from([
                 (1, 0.000001),
                 (GRASS, 1.),
                 (SAND, 0.000001),
                 (SNOW, 45.),
                 (ROCKY, 70.),
             ])
-        )),
+        ))),
     ]);
 
     MapColoringAssigner::with_rules(rules)
 }
 
 
-fn save_colormap(filepath: &str) -> HashMap<i8, MapColor> {
+fn save_colormap(filepath: &str) -> GridMapDs<i8, MapColor> {
     let colormap = landmass_generate_colormap();
     let rule_file = File::create(filepath).unwrap();
     serde_json::to_writer_pretty(rule_file, &colormap).unwrap();
     colormap
 }
 
-pub fn read_colormap(filepath: &str) -> HashMap<i8, ril::Rgb> {
+pub fn read_colormap(filepath: &str) -> GridMapDs<i8, ril::Rgb> {
     let rule_file = File::open(filepath);
     let raw_result = match rule_file {
         Ok(rule_fh) => serde_json::from_reader(rule_fh).unwrap(),

@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::Error;
@@ -20,14 +19,15 @@ use crate::mapgen_presets;
 use crate::position::{ConvertibleMapPosition, MapPosition, PositionKey};
 use crate::position2d::CompactMapPosition;
 use crate::sampler::{DistributionKey, MultinomialDistribution};
+use crate::types::GridMapDs;
 // use crate::visualizers::{JsonDataVisualizer, MapColor, MapVisualizer, RilPixelVisualizer};
-use crate::visualizers::{JsonDataVisualizer, MapColor, MapVisualizer};
+use crate::visualizers::{ImageAndJsonDataVisualizer, JsonDataVisualizer, MapColor, MapVisualizer, RilPixelVisualizer};
 
 
 #[derive(Serialize, Deserialize)]
 pub struct GeneratorRuleset<A: DistributionKey> {
     layout_rules: MapColoringAssigner<A>,
-    coloring_rules: HashMap<A, MapColor>,
+    coloring_rules: GridMapDs<A, MapColor>,
     pub(crate) map_size: u32,
     pub(crate) adjacency: Option<String>,
     comments: Option<String>
@@ -36,7 +36,7 @@ pub struct GeneratorRuleset<A: DistributionKey> {
 impl<A: DistributionKey> GeneratorRuleset<A> {
     pub fn new(
         layout: MapColoringAssigner<A>,
-        coloring: HashMap<A, MapColor>,
+        coloring: GridMapDs<A, MapColor>,
         map_size: Option<u32>,
         adjacency: Option<String>,
     ) -> Self {
@@ -58,7 +58,7 @@ impl<A: DistributionKey> From<GeneratorRuleset<A>> for MapColoringAssigner<A> {
     }
 }
 
-impl<A: DistributionKey> From<GeneratorRuleset<A>> for HashMap<A, MapColor> {
+impl<A: DistributionKey> From<GeneratorRuleset<A>> for GridMapDs<A, MapColor> {
     fn from(val: GeneratorRuleset<A>) -> Self {
         val.coloring_rules
     }
@@ -72,7 +72,7 @@ impl<'a, 'b, 'c, BS: Borrow<&'c str>> From<(&'a str, &'b str, Option<u32>, Optio
         let map_size = value.2;
         let adjacency = value.3.map(|a| a.borrow().trim().to_lowercase());
 
-        let raw_colormap: HashMap<i8, ril::Rgb> = mapgen_presets::read_colormap(colormap_path);
+        let raw_colormap: GridMapDs<i8, ril::Rgb> = mapgen_presets::read_colormap(colormap_path);
         let colormap = raw_colormap.iter().map(
             |(k, v)| {
                 let val = MapColor::from(v);
@@ -139,7 +139,7 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
         let map_usize = <usize as NumCast>::from(raw_map_size).unwrap();
         let true_map_size = <<MP as MapPosition<2>>::Key as NumCast>::from(raw_map_size).unwrap_or(MP::Key::max_value());
 
-        let colormap: HashMap<DK, ril::Rgb> = self.coloring_rules.iter().map(
+        let colormap: GridMapDs<DK, ril::Rgb> = self.coloring_rules.iter().map(
             |(k, v)| (
                 k.to_owned(),
                 v.to_owned().into()
@@ -149,6 +149,7 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
         let mut tile_positions: SmallVec<[(<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key); 16384]> = smallvec::SmallVec::with_capacity(map_usize * map_usize);
         for pos_x in num::range(MP::Key::zero(), true_map_size) {
             for pos_y in num::range(MP::Key::zero(), true_map_size) {
+                //println!("Pushing position ({:?},{:?}) to mapbuilder stack", pos_x, pos_y);
                 tile_positions.push((pos_x, pos_y))
             }
         }
@@ -156,7 +157,8 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
         let tile_iter: std::slice::Iter<'_, (<MP as MapPosition<2>>::Key, <MP as MapPosition<2>>::Key)> = tile_positions.iter();
 
         let test_tiles = tile_iter.map(
-            |(x, y)| Map2DNode::with_possibilities(
+            |(x, y)| {
+                Map2DNode::with_possibilities(
                 MP::from_dims([
                     <<MP as MapPosition<2>>::Key as NumCast>::from(x.to_owned()).unwrap(),
                     <<MP as MapPosition<2>>::Key as NumCast>::from(y.to_owned()).unwrap()
@@ -164,7 +166,7 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
                 MultinomialDistribution::uniform_over(
                     colormap.keys().map(|k| k.to_owned())
                 )
-            )
+            )}
         );
         Map2D::from_tiles(test_tiles)
     }
@@ -223,7 +225,7 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
         );
 
         let mut job = MapColoringJob::new_with_queue(assignment_rules, gen_map);
-        let map_result = job.queue_and_assign();
+        let map_result = job.assign_map();
         let map_reader = map_result.try_borrow().unwrap();
 
         visualiser.visualise(&map_reader, None);
@@ -246,10 +248,14 @@ impl<DK: DistributionKey + Serialize> GeneratorRuleset<DK> {
             PK: PositionKey + NumCast + Into<u32> + Serialize,
             MP: MapPosition<2, Key=PK> + ConvertibleMapPosition<2, PK, CompactMapPosition<PK>>
     {
-        // let visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
-        // self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(init_map, visualizer)
-        let visualizer = JsonDataVisualizer::new();
-        self.generate_with_visualizer::<AG, MP, JsonDataVisualizer>(init_map, visualizer)
+        // let ril_visualizer = RilPixelVisualizer::from(self.coloring_rules.to_owned());
+        // self.generate_with_visualizer::<AG, MP, RilPixelVisualizer<DK>>(init_map, ril_visualizer)
+
+        let json_visualizer = JsonDataVisualizer::new();
+        self.generate_with_visualizer::<AG, MP, JsonDataVisualizer>(init_map, json_visualizer)
+
+        // let visualizer = ImageAndJsonDataVisualizer::from((ril_visualizer, json_visualizer));
+        // self.generate_with_visualizer::<AG, MP, ImageAndJsonDataVisualizer<PK>>(init_map, visualizer)
     }
 
     /// Creates a filled (i.e. 'collapsed') map from scratch,

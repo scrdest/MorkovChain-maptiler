@@ -1,17 +1,20 @@
 use std::borrow::Borrow;
 use std::collections::binary_heap::BinaryHeap;
-use std::collections::{HashMap, HashSet};
-use std::ops::Deref;
+use std::collections::{HashSet};
+use std::ops::{Deref};
 use std::rc::{Rc};
 use std::cell::{RefCell};
+use num::Zero;
 
 use serde::{Deserialize, Serialize};
 
 use crate::map2d::Map2D;
-use crate::sampler::{DistributionKey, MultinomialDistribution};
+use crate::sampler::{DistributionKey};
 use crate::adjacency::AdjacencyGenerator;
+use crate::directions::{Cardinal2dDirectionVariant, Directions2d};
 use crate::map2dnode::{MapNodeEntropyOrdering, MapNodeState, MapNodeWrapper};
 use crate::position::{MapPosition};
+use crate::types::{GridMapDs, PossiblyDirectedMultinomialDistribution};
 
 type Queue<AG, K, MP> = Rc<RefCell<BinaryHeap<MapNodeEntropyOrdering<AG, K, MP>>>>;
 
@@ -25,12 +28,12 @@ enum QueueState {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MapColoringAssigner<K: DistributionKey> {
-    pub(crate) transition_rules: HashMap<K, MultinomialDistribution<K>>,
+    pub(crate) transition_rules: GridMapDs<K, PossiblyDirectedMultinomialDistribution<K>>,
     comments: Option<String>
 }
 
 impl<K: DistributionKey> MapColoringAssigner<K> {
-    pub fn with_rules(rules: HashMap<K, MultinomialDistribution<K>>) -> Self {
+    pub fn with_rules(rules: GridMapDs<K, PossiblyDirectedMultinomialDistribution<K>>) -> Self {
         Self {
             transition_rules: rules,
             comments: None
@@ -71,7 +74,9 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
         for tile_lock in map_reader.undecided_tiles.values() {
             let tile_reader = tile_lock.try_borrow().unwrap();
             let is_assigned = tile_reader.state.is_assigned();
-            if is_assigned { continue };
+            if is_assigned {
+                continue
+            };
 
             let tile = tile_reader.deref().to_owned();
             let ord_tile = MapNodeEntropyOrdering::from(tile);
@@ -107,7 +112,8 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
                 MapNodeWrapper::Raw(node) => Rc::new(RefCell::new(node.to_owned())),
                 MapNodeWrapper::Rc(node) => node.to_owned(),
             };
-            let mut node = raw_node.try_borrow_mut().unwrap();
+             let mut node = raw_node.try_borrow_mut().unwrap();
+
             let node_state = &node.state.to_owned();
             let curr_pos = node.position;
 
@@ -134,9 +140,10 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
             let neighbors = map_operator.adjacent(node.deref());
             drop(node);
 
-            neighbors.iter().for_each(|neighbor| {
+            neighbors.iter().for_each(|(offset_pos, neighbor)| {
                 // println!("Acquiring lock for neighbor {:?}...", neighbor);
                 let maybe_neighbor_rule_probas;
+
                 {
                     // sub-scope to free up the reader after use
                     let neighbor_reader = neighbor.try_borrow().unwrap();
@@ -148,18 +155,42 @@ where <AG as AdjacencyGenerator<2>>::Input: Borrow<MP> + From<MP>
 
                 if let Some(neighbor_rule_probas) = maybe_neighbor_rule_probas {
                     let mut neighbor_writer = neighbor.try_borrow_mut().unwrap();
-                    let new_possibilities = self_rule_probas.joint_probability(&neighbor_rule_probas);
+                    let selected_probas = match self_rule_probas {
+                        PossiblyDirectedMultinomialDistribution::Undirected(u) => u,
+                        PossiblyDirectedMultinomialDistribution::Directed(du) => {
+                            let srcdims = curr_pos.get_dims();
+                            let offs = (offset_pos[0] - srcdims[0], offset_pos[1] - srcdims[1]);
+                            let zer = MP::Key::zero();
+
+                            let case = match offs {
+                                (zer, y) if y > zer => Directions2d::NORTH,
+                                (x, zer) if x > zer => Directions2d::EAST,
+                                (zer, y) if y < zer => Directions2d::SOUTH,
+                                (x, zer) if x < zer => Directions2d::WEST,
+                                (x, y) if x > zer && y > zer => Directions2d::NORTHEAST,
+                                (x, y) if x > zer && y < zer => Directions2d::NORTHWEST,
+                                (x, y) if x > zer && y < zer => Directions2d::SOUTHEAST,
+                                (x, y) if x < zer && y < zer => Directions2d::SOUTHWEST,
+                                (_, _) => panic!("Unaccounted-for direction!"),
+                            };
+
+                            let result = du.value_for_cardinal(&case).unwrap();
+                            result
+                        }
+                    };
+                    let new_possibilities = selected_probas.joint_probability(neighbor_rule_probas);
                     neighbor_writer.state = MapNodeState::from(new_possibilities);
                     //println!("Assigned new probas for neighbor {:?}!", neighbor);
 
                     let neigh_pos = neighbor_writer.position;
                     drop(neighbor_writer);
 
-                    let neigh_queued = enqueued.get(&neigh_pos).is_some();
+                    let neigh_unqueued = enqueued.get(&neigh_pos).is_none();
 
-                    if !neigh_queued {
+                    if neigh_unqueued {
                         let wrapped_neighbor = MapNodeEntropyOrdering::from(neighbor.to_owned());
                         queue_writer.push(wrapped_neighbor);
+                        enqueued.insert(neigh_pos);
                     }
 
                 }
@@ -184,6 +215,7 @@ mod tests {
     use crate::map2dnode::Map2DNode;
     use crate::OctileAdjacencyGenerator;
     use crate::position2d::Position2D;
+    use crate::sampler::MultinomialDistribution;
     use super::*;
 
     #[test]
@@ -202,24 +234,30 @@ mod tests {
             )
         );
         let testmap = Map2D::from_tiles(test_tiles);
-        let rules = HashMap::from([
-            (1, MultinomialDistribution::from(
-                HashMap::from([
-                    (2, 1.),
-                    (3, 5.)
-                ])
+        let rules = GridMapDs::from([
+            (1, PossiblyDirectedMultinomialDistribution::from(
+             MultinomialDistribution::from(
+                    GridMapDs::from([
+                        (2, 1.),
+                        (3, 5.)
+                    ])
+                )
             )),
-            (2, MultinomialDistribution::from(
-                HashMap::from([
-                    (1, 5.),
-                    (3, 1.)
-                ])
+            (2, PossiblyDirectedMultinomialDistribution::from(
+                MultinomialDistribution::from(
+                    GridMapDs::from([
+                        (1, 5.),
+                        (3, 1.)
+                    ])
+                )
             )),
-            (3, MultinomialDistribution::from(
-                HashMap::from([
-                    (1, 1.),
-                    (2, 5.)
-                ])
+            (3, PossiblyDirectedMultinomialDistribution::from(
+                MultinomialDistribution::from(
+                    GridMapDs::from([
+                        (1, 1.),
+                        (2, 5.)
+                    ])
+                )
             )),
         ]);
 

@@ -1,15 +1,16 @@
 use std::borrow::Borrow;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Add};
 use serde::Serialize;
 use crate::adjacency::AdjacencyGenerator;
 
-pub trait PositionKey: Copy + Clone + Add<Output = Self> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded {}
+pub trait PositionKey: Debug + Copy + Clone + Add<Output = Self> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded + num::CheckedAdd + num::CheckedSub {}
 // blanket impl for any good types
-impl<P: Copy + Clone + Add<Output = P> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded> PositionKey for P {}
+impl<P: Debug + Copy + Clone + Add<Output = P> + PartialOrd + Ord + Eq + Hash + num::Num + num::ToPrimitive + num::Zero + num::One + num::Bounded + num::CheckedAdd + num::CheckedSub> PositionKey for P {}
 
 
-pub trait MapPosition<const DIMS: usize>: Eq + Hash + Sized + Copy + Clone + Borrow<Self> + Serialize {
+pub trait MapPosition<const DIMS: usize>: Eq + Hash + Sized + Copy + Clone + Borrow<Self> + Serialize + Debug {
     type Key: PositionKey;
 
     fn get_dims(&self) -> [Self::Key; DIMS];

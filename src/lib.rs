@@ -15,6 +15,9 @@ pub mod position;
 pub mod position2d;
 pub mod map2dnode;
 pub mod adjacency;
+pub mod types;
+pub mod bitpack;
+pub mod directions;
 
 const COLORMAP_FILENAME: &str = "coloring_rules.json";
 const RULESET_FILENAME: &str = "layout_rules.json";

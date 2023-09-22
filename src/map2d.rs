@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::collections::HashMap;
 use std::rc::{Rc};
 use std::cell::{RefCell};
 use smallvec::SmallVec;
@@ -9,12 +8,13 @@ use crate::adjacency::{AdjacencyGenerator};
 use crate::sampler::{DistributionKey, MultinomialDistribution};
 use crate::map2dnode::{Map2DNode, MapNodeState, ThreadsafeNodeRef};
 use crate::position::{MapPosition};
+use crate::types::{GridMapDs};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Map2D<AG: AdjacencyGenerator<2>, K: DistributionKey, MP: MapPosition<2>> {
     pub tiles: Vec<ThreadsafeNodeRef<AG, K, MP>>,
-    position_index: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>>,
-    pub undecided_tiles: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>>,
+    position_index: GridMapDs<MP, ThreadsafeNodeRef<AG, K, MP>>,
+    pub undecided_tiles: GridMapDs<MP, ThreadsafeNodeRef<AG, K, MP>>,
     pub(crate) min_pos: MP,
     pub(crate) max_pos: MP,
 }
@@ -25,8 +25,8 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
         let size_estimate = iterator.size_hint().0;
 
         let mut tile_vec: Vec<ThreadsafeNodeRef<AG, K, MP>> = Vec::with_capacity(size_estimate);
-        let mut position_hashmap: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>> = HashMap::with_capacity(size_estimate);
-        let mut undecided_hashmap: HashMap<MP, ThreadsafeNodeRef<AG, K, MP>> = HashMap::with_capacity(size_estimate);
+        let mut position_hashmap: GridMapDs<MP, ThreadsafeNodeRef<AG, K, MP>> = GridMapDs::with_capacity(size_estimate);
+        let mut undecided_hashmap: GridMapDs<MP, ThreadsafeNodeRef<AG, K, MP>> = GridMapDs::with_capacity(size_estimate);
         let mut minx = None;
         let mut miny = None;
         let mut maxx = None;
@@ -118,7 +118,7 @@ impl<AG: AdjacencyGenerator<2, Input = MP>, K: DistributionKey, MP: MapPosition<
 impl<K: DistributionKey, MP: MapPosition<2>, RMP: Borrow<MP> + From<MP>, AG: AdjacencyGenerator<2, Input=RMP>> Map2D<AG, K, MP> {
     // NOTE: we're using a magic maxcap, because generics are a bane of my existence
 
-    pub fn adjacent_from_pos(&self, pos: RMP) -> SmallVec<[ThreadsafeNodeRef<AG, K, MP>; 8]> {
+    pub fn adjacent_from_pos(&self, pos: RMP) -> SmallVec<[([MP::Key; 2], ThreadsafeNodeRef<AG, K, MP>); 8]> {
         let adjacents: AG::Output = MapPosition::adjacents::<RMP, AG>(pos);
 
         let result = adjacents
@@ -128,14 +128,16 @@ impl<K: DistributionKey, MP: MapPosition<2>, RMP: Borrow<MP> + From<MP>, AG: Adj
                     let rcand = cand.borrow();
                     self.position_index
                         .get(rcand)
-                        .map(|x| x.to_owned())
+                        .map(|x|
+                            (rcand.get_dims(), x.to_owned())
+                        )
                 }
             );
 
         result.collect()
     }
 
-    pub fn adjacent<NR: Borrow<Map2DNode<AG, K, MP>>>(&self, node: NR) -> SmallVec<[ThreadsafeNodeRef<AG, K, MP>; 8]> {
+    pub fn adjacent<NR: Borrow<Map2DNode<AG, K, MP>>>(&self, node: NR) -> SmallVec<[([MP::Key; 2], ThreadsafeNodeRef<AG, K, MP>); 8]> {
         let pos = node.borrow().position;
         let borrowed_pos: RMP = pos.into();
 

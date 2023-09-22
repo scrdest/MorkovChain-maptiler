@@ -1,9 +1,7 @@
 use std::borrow::Borrow;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::{Debug};
 use std::fs::File;
-use itertools::Itertools;
 use num::{Bounded, NumCast, One};
 use crate::map2d::Map2D;
 use crate::sampler::DistributionKey;
@@ -14,6 +12,7 @@ use crate::adjacency::AdjacencyGenerator;
 use crate::map2dnode::{Map2DNode, MapNodeState};
 use crate::position::{ConvertibleMapPosition, MapPosition, PositionKey};
 use crate::position2d::CompactMapPosition;
+use crate::types::GridMapDs;
 
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -45,19 +44,19 @@ pub trait MapVisualizer<AG: AdjacencyGenerator<2>, N: DistributionKey, MP: MapPo
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RilPixelVisualizer<N: DistributionKey> {
-    color_lookup: HashMap<N, MapColor>
+    color_lookup: GridMapDs<N, MapColor>
 }
 
 impl<N: DistributionKey> RilPixelVisualizer<N> {
-    pub fn new(color_lookup: HashMap<N, MapColor>) -> Self {
+    pub fn new(color_lookup: GridMapDs<N, MapColor>) -> Self {
         Self {
             color_lookup
         }
     }
 }
 
-impl<N: DistributionKey> From<&HashMap<N, ril::Rgb>> for RilPixelVisualizer<N> {
-    fn from(value: &HashMap<N, ril::Rgb>) -> Self {
+impl<N: DistributionKey> From<&GridMapDs<N, ril::Rgb>> for RilPixelVisualizer<N> {
+    fn from(value: &GridMapDs<N, ril::Rgb>) -> Self {
         Self::new(value
             .iter()
             .map(|(k, v)| (
@@ -68,19 +67,19 @@ impl<N: DistributionKey> From<&HashMap<N, ril::Rgb>> for RilPixelVisualizer<N> {
     }
 }
 
-impl<N: DistributionKey> From<HashMap<N, MapColor>> for RilPixelVisualizer<N> {
-    fn from(value: HashMap<N, MapColor>) -> Self {
+impl<N: DistributionKey> From<GridMapDs<N, MapColor>> for RilPixelVisualizer<N> {
+    fn from(value: GridMapDs<N, MapColor>) -> Self {
         Self::new(value)
     }
 }
 
-impl<AG: AdjacencyGenerator<2>, N: DistributionKey, MP: MapPosition<2>> MapVisualizer<AG, N, MP> for RilPixelVisualizer<N>
+impl<AG: AdjacencyGenerator<2>, DK: DistributionKey, MP: MapPosition<2>> MapVisualizer<AG, DK, MP> for RilPixelVisualizer<DK>
 where MP::Key: PositionKey + NumCast + Into<u32>
 {
     type Output = ();
     type Args = String;
 
-    fn visualise(&self, map: &Map2D<AG, N, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
+    fn visualise(&self, map: &Map2D<AG, DK, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
         const MAP_SCALE_FACTOR: u32 = 1;
 
         let min_pos = map.min_pos.get_dims();
@@ -174,6 +173,52 @@ impl JsonDataVisualizer {
 }
 
 
+#[derive(Debug, Clone)]
+pub struct ImageAndJsonDataVisualizer<DK: DistributionKey + Serialize> {
+    img: RilPixelVisualizer<DK>,
+    json: JsonDataVisualizer
+}
+
+impl<DK: DistributionKey + Serialize> ImageAndJsonDataVisualizer<DK> {
+    pub fn new(img: RilPixelVisualizer<DK>, json: JsonDataVisualizer) -> Self {
+        Self {
+            img, json
+        }
+    }
+}
+
+impl<DK: DistributionKey + Serialize> From<(RilPixelVisualizer<DK>, JsonDataVisualizer)> for ImageAndJsonDataVisualizer<DK> {
+    fn from(value: (RilPixelVisualizer<DK>, JsonDataVisualizer)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl<DK: DistributionKey + Serialize> From<(JsonDataVisualizer, RilPixelVisualizer<DK>)> for ImageAndJsonDataVisualizer<DK> {
+    fn from(value: (JsonDataVisualizer, RilPixelVisualizer<DK>)) -> Self {
+        Self::new(value.1, value.0)
+    }
+}
+
+impl<AG: AdjacencyGenerator<2>, PK, MP: MapPosition<2>> MapVisualizer<AG, PK, MP> for ImageAndJsonDataVisualizer<PK>
+where
+    MP::Key: NumCast + Serialize,
+    PK: PositionKey + NumCast + Into<u32> + Serialize + Default,
+    MP: MapPosition<2, Key=PK> + ConvertibleMapPosition<2, PK, CompactMapPosition<PK>>
+{
+    type Output = (<RilPixelVisualizer<PK> as MapVisualizer<AG, PK, MP>>::Output, <JsonDataVisualizer as MapVisualizer<AG, PK, MP>>::Output);
+    type Args = (<RilPixelVisualizer<PK> as MapVisualizer<AG, PK, MP>>::Args, <JsonDataVisualizer as MapVisualizer<AG, PK, MP>>::Args);
+
+    fn visualise(&self, map: &Map2D<AG, PK, MP>, args: Option<Self::Args>) -> Option<Self::Output> {
+        let (left_args, right_args) = match args {
+            None => (None, None),
+            Some(tup) => (Some(tup.0), Some(tup.1))
+        };
+        self.img.visualise(map, left_args);
+        self.json.visualise(map, right_args);
+        Some(((), ()))
+    }
+}
+
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Map2DNodeSerialized<K: DistributionKey, MP: MapPosition<2>> {
@@ -197,7 +242,7 @@ struct SerializableMap2D<
     MP: MapPosition<2> + Serialize
 > {
     pub tiles: Vec<Map2DNodeSerialized<K, MP>>,
-    // position_index: HashMap<MP, Map2DNodeSerialized<K, MP>>,
+    // position_index: GridMapDs<MP, Map2DNodeSerialized<K, MP>>,
     // pub(crate) min_pos: MP,
     // pub(crate) max_pos: MP,
 }
@@ -231,7 +276,7 @@ impl<
 
         let size_estimate = value.tiles.len();
         let mut tile_vec: Vec<Map2DNodeSerialized<K, CompactMapPosition<MP::Key>>> = Vec::with_capacity(size_estimate);
-        // let mut position_hashmap: HashMap<MP, Map2DNodeSerialized<K, MP>> = HashMap::with_capacity(size_estimate);
+        // let mut position_hashmap: GridMapDs<MP, Map2DNodeSerialized<K, MP>> = GridMapDs::with_capacity(size_estimate);
 
         nodes.for_each(|node| {
             tile_vec.push(node);
@@ -249,16 +294,17 @@ impl<
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-struct CompactedSerializableMap2D {
+struct CompactedSerializableMap2D<const SEP: char> {
     pub tiles: Vec<String>
 }
 
 impl<
+    const SEP: char,
     AG: AdjacencyGenerator<2>,
     K: DistributionKey + Serialize,
     T: PositionKey + Serialize,
     MP: MapPosition<2, Key=T> + ConvertibleMapPosition<2, T, CompactMapPosition<T>>
-> From<&Map2D<AG, K, MP>> for CompactedSerializableMap2D
+> From<&Map2D<AG, K, MP>> for CompactedSerializableMap2D<SEP>
 {
     fn from(value: &Map2D<AG, K, MP>) -> Self {
         let nodes = value.tiles.iter().map(
@@ -268,7 +314,11 @@ impl<
 
                 let state = match owned_tile.state {
                     MapNodeState::Finalized(stateval) => stateval,
-                    _ => panic!("Undecided tiles left!")
+                    MapNodeState::Undecided(dist) => {
+                        println!("Undecided tiles left at {:?}!", owned_tile.position.get_dims());
+                        dist.sample_with_default_rng()
+                    }
+                    // _ => panic!("{}", format!("Undecided tiles left at {:?}!", owned_tile.position))
                 };
 
                 let position = owned_tile.position.convert();
@@ -288,14 +338,14 @@ impl<
                 );
                 let state = serde_json::to_string(&node.state).unwrap();
 
-                let str_node = format!("{s}@{x},{y}", s=state, x=dims[0], y=dims[1]);
+                let str_node = format!("{s}{sep}{x},{y}", s=state, sep=SEP, x=dims[0], y=dims[1]);
                 str_node
             }
         );
 
         let size_estimate = value.tiles.len();
         let mut tile_vec: Vec<String> = Vec::with_capacity(size_estimate);
-        // let mut position_hashmap: HashMap<MP, Map2DNodeSerialized<K, MP>> = HashMap::with_capacity(size_estimate);
+        // let mut position_hashmap: GridMapDs<MP, Map2DNodeSerialized<K, MP>> = GridMapDs::with_capacity(size_estimate);
 
         strings.for_each(|node| {
             tile_vec.push(node);
@@ -321,7 +371,7 @@ where
     fn visualise(&self, map: &Map2D<AG, DK, MP>, output: Option<Self::Args>) -> Option<Self::Output> {
         let fname = output.unwrap_or(Self::Args::from("genmap.json"));
 
-        let castmap = CompactedSerializableMap2D::from(map);
+        let castmap: CompactedSerializableMap2D<'|'> = CompactedSerializableMap2D::from(map);
 
         let result = serde_json::to_writer(
             File::create(fname).unwrap(),
